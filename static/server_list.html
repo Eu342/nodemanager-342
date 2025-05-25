@@ -1,0 +1,1861 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NodeManager - Управление серверами</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --bg-tertiary: #ffffff;
+            --bg-elevated: #ffffff;
+            --bg-glass: rgba(255, 255, 255, 0.85);
+            --text-primary: #0f1419;
+            --text-secondary: #657786;
+            --text-tertiary: #8b98a5;
+            --text-muted: #aab8c2;
+            --border-light: #f7f9fa;
+            --border-medium: #e1e8ed;
+            --border-strong: #cfd9de;
+            --accent: #1d9bf0;
+            --accent-hover: #1a8cd8;
+            --accent-light: rgba(29, 155, 240, 0.1);
+            --accent-subtle: rgba(29, 155, 240, 0.04);
+            --success: #00ba7c;
+            --success-light: rgba(0, 186, 124, 0.1);
+            --warning: #f7931e;
+            --warning-light: rgba(247, 147, 30, 0.1);
+            --danger: #f4212e;
+            --danger-light: rgba(244, 33, 46, 0.1);
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+            --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.15);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+            --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-slow: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            --glass-blur: blur(20px);
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #000000;
+            --bg-secondary: #16181c;
+            --bg-tertiary: #1c1f23;
+            --bg-elevated: #202327;
+            --bg-glass: rgba(0, 0, 0, 0.8);
+            --text-primary: #e7e9ea;
+            --text-secondary: #71767b;
+            --text-tertiary: #71767b;
+            --text-muted: #5b7083;
+            --border-light: #2f3336;
+            --border-medium: #3e4144;
+            --border-strong: #536471;
+            --accent-subtle: rgba(29, 155, 240, 0.08);
+            --shadow-sm: 0 1px 3px rgba(255, 255, 255, 0.04);
+            --shadow-md: 0 4px 12px rgba(255, 255, 255, 0.06);
+            --shadow-lg: 0 8px 24px rgba(255, 255, 255, 0.08);
+            --shadow-xl: 0 20px 60px rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+            transition: var(--transition);
+            overflow-x: hidden;
+        }
+
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: var(--bg-glass);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border-right: 1px solid var(--border-light);
+            padding: 24px 0;
+            position: fixed;
+            height: 100vh;
+            z-index: 100;
+            transition: var(--transition-slow);
+        }
+
+        .sidebar-header {
+            padding: 0 24px 24px;
+            border-bottom: 1px solid var(--border-light);
+            margin-bottom: 24px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent) 0%, #1a8cd8 100%);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 16px;
+            box-shadow: var(--shadow-md);
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+        }
+
+        .nav-items {
+            padding: 0 16px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            margin-bottom: 2px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: var(--transition);
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 15px;
+            position: relative;
+            overflow: hidden;
+            text-decoration: none;
+        }
+
+        .nav-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--accent-subtle);
+            opacity: 0;
+            transition: var(--transition);
+            border-radius: var(--radius-md);
+        }
+
+        .nav-item:hover::before {
+            opacity: 1;
+        }
+
+        .nav-item:hover {
+            color: var(--text-primary);
+            transform: translateX(2px);
+        }
+
+        .nav-item.active {
+            background: var(--accent);
+            color: white;
+            box-shadow: var(--shadow-md);
+        }
+
+        .nav-item.active::before {
+            display: none;
+        }
+
+        .nav-item-icon {
+            width: 20px;
+            height: 20px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Main Content */
+        .main-content {
+            margin-left: 280px;
+            flex: 1;
+            background: var(--bg-primary);
+            min-height: 100vh;
+        }
+
+        .content-header {
+            position: sticky;
+            top: 0;
+            background: var(--bg-glass);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border-bottom: 1px solid var(--border-light);
+            padding: 20px 32px;
+            z-index: 50;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .page-title {
+            font-size: 32px;
+            font-weight: 800;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .action-button {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-medium);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: var(--transition);
+            font-weight: 500;
+            font-size: 14px;
+            color: var(--text-primary);
+            text-decoration: none;
+        }
+
+        .action-button:hover {
+            background: var(--bg-secondary);
+            border-color: var(--border-strong);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .action-button.primary {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+
+        .action-button.primary:hover {
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
+            box-shadow: var(--shadow-md);
+        }
+
+        .selected-actions {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            background: var(--accent-light);
+            border: 1px solid var(--accent);
+            border-radius: var(--radius-md);
+            margin-top: 16px;
+            animation: slideDown 0.3s ease;
+        }
+
+        .selected-actions.visible {
+            display: flex;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .selected-count {
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 24px;
+            padding: 32px;
+            margin-bottom: 8px;
+        }
+
+        .stat-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            transition: var(--transition-slow);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent) 0%, var(--success) 100%);
+        }
+
+        .stat-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--border-medium);
+        }
+
+        .stat-value {
+            font-size: 36px;
+            font-weight: 800;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            line-height: 1;
+            letter-spacing: -0.02em;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-icon {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            width: 24px;
+            height: 24px;
+            color: var(--accent);
+            opacity: 0.7;
+        }
+
+        /* Search */
+        .search-section {
+            padding: 0 32px 24px;
+        }
+
+        .search-container {
+            position: relative;
+            max-width: 480px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 16px 48px 16px 20px;
+            background: var(--bg-elevated);
+            border: 2px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            font-size: 16px;
+            color: var(--text-primary);
+            transition: var(--transition);
+            font-weight: 400;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 4px var(--accent-light);
+            background: var(--bg-primary);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 20px;
+            height: 20px;
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+
+        /* Table */
+        .table-section {
+            padding: 0 32px 32px;
+        }
+
+        .table-container {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: var(--bg-secondary);
+        }
+
+        th {
+            text-align: left;
+            padding: 20px 24px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            cursor: pointer;
+            user-select: none;
+            transition: var(--transition);
+            border-bottom: 1px solid var(--border-light);
+        }
+
+        th:hover {
+            color: var(--text-primary);
+            background: var(--accent-subtle);
+        }
+
+        th.sortable {
+            position: relative;
+        }
+
+        .sort-icon {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 16px;
+            opacity: 0;
+            transition: var(--transition);
+            color: var(--text-secondary);
+        }
+
+        th.active .sort-icon {
+            opacity: 1;
+            color: var(--accent);
+        }
+
+        th.asc .sort-icon {
+            transform: translateY(-50%) rotate(180deg);
+        }
+
+        tr {
+            transition: var(--transition);
+            border-bottom: 1px solid var(--border-light);
+        }
+
+        tr:last-child {
+            border-bottom: none;
+        }
+
+        tbody tr:hover {
+            background: var(--accent-subtle);
+        }
+
+        tbody tr.selected {
+            background: var(--accent-light);
+            border-left: 3px solid var(--accent);
+        }
+
+        td {
+            padding: 20px 24px;
+            color: var(--text-primary);
+            font-weight: 400;
+            vertical-align: middle;
+        }
+
+        .checkbox-cell {
+            width: 48px;
+        }
+
+        .custom-checkbox {
+            position: relative;
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+        }
+
+        .custom-checkbox input {
+            opacity: 0;
+            position: absolute;
+            cursor: pointer;
+        }
+
+        .checkmark {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 20px;
+            width: 20px;
+            background: var(--bg-primary);
+            border: 2px solid var(--border-medium);
+            border-radius: 6px;
+            transition: var(--transition);
+            cursor: pointer;
+        }
+
+        .custom-checkbox input:checked ~ .checkmark {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .checkmark:after {
+            content: "";
+            position: absolute;
+            display: none;
+            left: 6px;
+            top: 2px;
+            width: 6px;
+            height: 10px;
+            border: solid white;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
+        }
+
+        .custom-checkbox input:checked ~ .checkmark:after {
+            display: block;
+        }
+
+        .server-ip {
+            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .server-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .status-online {
+            background: var(--success-light);
+            color: var(--success);
+        }
+
+        .status-offline {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+
+        .status-unknown {
+            background: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .actions-cell {
+            width: 80px;
+        }
+
+        .action-menu-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-medium);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: var(--transition);
+            color: var(--text-secondary);
+        }
+
+        .action-menu-button:hover {
+            background: var(--accent-subtle);
+            border-color: var(--accent);
+            color: var(--accent);
+            transform: scale(1.05);
+        }
+
+        /* Dropdown Menu */
+        .dropdown-menu {
+            position: fixed;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-medium);
+            border-radius: var(--radius-md);
+            min-width: 200px;
+            box-shadow: var(--shadow-xl);
+            opacity: 0;
+            transform: scale(0.95) translateY(-10px);
+            pointer-events: none;
+            transition: var(--transition);
+            z-index: 1000;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+        }
+
+        .dropdown-menu.active {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+            pointer-events: all;
+        }
+
+        .dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: var(--transition);
+            color: var(--text-primary);
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .dropdown-item:hover {
+            background: var(--accent-subtle);
+            color: var(--accent);
+        }
+
+        .dropdown-item.danger {
+            color: var(--danger);
+        }
+
+        .dropdown-item.danger:hover {
+            background: var(--danger-light);
+        }
+
+        .dropdown-item:first-child {
+            border-radius: var(--radius-md) var(--radius-md) 0 0;
+        }
+
+        .dropdown-item:last-child {
+            border-radius: 0 0 var(--radius-md) var(--radius-md);
+        }
+
+        .dropdown-icon {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            opacity: 0;
+            pointer-events: none;
+            transition: var(--transition-slow);
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .modal-content {
+            background: var(--bg-elevated);
+            border-radius: var(--radius-xl);
+            padding: 32px;
+            max-width: 480px;
+            width: 90%;
+            box-shadow: var(--shadow-xl);
+            transform: scale(0.9);
+            transition: var(--transition-slow);
+        }
+
+        .modal-overlay.active .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-header {
+            margin-bottom: 20px;
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .modal-description {
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            margin-top: 24px;
+        }
+
+        .modal-button {
+            padding: 12px 24px;
+            border-radius: var(--radius-md);
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            border: none;
+            transition: var(--transition);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal-button.secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-medium);
+        }
+
+        .modal-button.secondary:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .modal-button.danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .modal-button.danger:hover {
+            background: #d32f2f;
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 3000;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .toast {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-medium);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            min-width: 320px;
+            opacity: 0;
+            transform: translateX(100px);
+            transition: var(--transition-slow);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--success);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--danger);
+        }
+
+        .toast.info {
+            border-left: 4px solid var(--accent);
+        }
+
+        .toast-icon {
+            width: 20px;
+            height: 20px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+        }
+
+        .toast.success .toast-icon {
+            color: var(--success);
+        }
+
+        .toast.error .toast-icon {
+            color: var(--danger);
+        }
+
+        .toast.info .toast-icon {
+            color: var(--accent);
+        }
+
+        .toast-message {
+            flex: 1;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 80px 40px;
+            color: var(--text-secondary);
+        }
+
+        .empty-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .empty-description {
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        /* Loading States */
+        .loading {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-medium);
+            border-top: 2px solid var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+
+            .sidebar.mobile-open {
+                transform: translateX(0);
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+                padding: 24px;
+            }
+
+            .content-header,
+            .search-section,
+            .table-section {
+                padding-left: 24px;
+                padding-right: 24px;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .page-title {
+                font-size: 24px;
+            }
+
+            .header-actions {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .action-button {
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+
+            .stats-grid {
+                padding: 16px;
+            }
+
+            .content-header,
+            .search-section,
+            .table-section {
+                padding-left: 16px;
+                padding-right: 16px;
+            }
+
+            th, td {
+                padding: 16px 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">N</div>
+                    <div class="logo-text">NodeManager</div>
+                </div>
+            </div>
+            
+            <nav class="nav-items">
+                <a href="/nodemanager" class="nav-item" data-page="dashboard">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2v2zm0 0V5a2 2 0 012-2h6l2 2h6a2 2 0 012 2v2"/>
+                    </svg>
+                    <span>Главная</span>
+                </a>
+                
+                <a href="/nodemanager/add" class="nav-item" data-page="add">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    <span>Добавить сервер</span>
+                </a>
+                
+                <a href="/nodemanager/setup" class="nav-item" data-page="install">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                    </svg>
+                    <span>Настроить сервер</span>
+                </a>
+                
+                <a href="/nodemanager/list" class="nav-item active" data-page="list">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    <span>Список серверов</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="content-header">
+                <div class="header-top">
+                    <h1 class="page-title">Управление серверами</h1>
+                    <div class="header-actions">
+                        <button class="action-button" onclick="history.back()">
+                            <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+                            </svg>
+                            Назад
+                        </button>
+                        <a href="/nodemanager/add" class="action-button primary">
+                            <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            Добавить сервер
+                        </a>
+                        <button class="action-button" onclick="toggleTheme()">
+                            <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Selected Actions Bar -->
+                <div class="selected-actions" id="selectedActions">
+                    <span class="selected-count" id="selectedCount">0 выбрано</span>
+                    <button class="action-button" onclick="bulkRestart()">
+                        <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                        Перезагрузить выбранные
+                    </button>
+                    <button class="action-button danger" onclick="bulkDelete()">
+                        <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                        Удалить выбранные
+                    </button>
+                    <button class="action-button" onclick="clearSelection()">
+                        Отменить выбор
+                    </button>
+                </div>
+            </header>
+
+            <!-- Stats Cards -->
+            <section class="stats-grid">
+                <div class="stat-card">
+                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+                    </svg>
+                    <div class="stat-value" id="totalServers">
+                        <span class="loading">
+                            <span class="spinner"></span>
+                            Загрузка...
+                        </span>
+                    </div>
+                    <div class="stat-label">Всего серверов</div>
+                </div>
+                
+                <div class="stat-card">
+                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                    <div class="stat-value" id="onlineServers">
+                        <span class="loading">
+                            <span class="spinner"></span>
+                            Загрузка...
+                        </span>
+                    </div>
+                    <div class="stat-label">Онлайн</div>
+                </div>
+                
+                <div class="stat-card">
+                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <div class="stat-value" id="selectedServers">0</div>
+                    <div class="stat-label">Выбрано</div>
+                </div>
+            </section>
+
+            <!-- Search -->
+            <section class="search-section">
+                <div class="search-container">
+                    <input type="text" class="search-input" id="searchInput" placeholder="Поиск по IP, инбаунду или дате...">
+                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                </div>
+            </section>
+
+            <!-- Table -->
+            <section class="table-section">
+                <div class="table-container">
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="checkbox-cell">
+                                        <label class="custom-checkbox">
+                                            <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                                            <span class="checkmark"></span>
+                                        </label>
+                                    </th>
+                                    <th class="sortable" onclick="sortTable('ip')">
+                                        IP адрес
+                                        <svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </th>
+                                    <th class="sortable" onclick="sortTable('inbound')">
+                                        Инбаунд
+                                        <svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </th>
+                                    <th class="sortable" onclick="sortTable('status')">
+                                        Статус
+                                        <svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </th>
+                                    <th class="sortable" onclick="sortTable('install_date')">
+                                        Дата установки
+                                        <svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </th>
+                                    <th class="actions-cell"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="serversTableBody">
+                                <tr>
+                                    <td colspan="6" class="empty-state">
+                                        <div class="loading">
+                                            <span class="spinner"></span>
+                                            Загрузка серверов...
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Dropdown Menu -->
+    <div class="dropdown-menu" id="dropdownMenu">
+        <div class="dropdown-item" id="restartAction">
+            <svg class="dropdown-icon" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Перезагрузить сервер
+        </div>
+        <div class="dropdown-item" id="editAction">
+            <svg class="dropdown-icon" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+            Редактировать
+        </div>
+        <div class="dropdown-item danger" id="deleteAction">
+            <svg class="dropdown-icon" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+            Удалить сервер
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalTitle">Подтвердите действие</h3>
+                <p class="modal-description" id="modalDescription"></p>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-button secondary" onclick="closeModal()">Отмена</button>
+                <button class="modal-button danger" id="modalConfirmButton" onclick="confirmModalAction()">Удалить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        // Global variables
+        let allServers = [];
+        let filteredServers = [];
+        let selectedServers = new Set();
+        let currentSort = { field: null, direction: 'asc' };
+        let currentModalAction = null;
+        let currentModalData = null;
+
+        // Initialize app
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM loaded');
+            loadServers();
+            setupEventListeners();
+            setupSearch();
+            loadTheme();
+        });
+
+        // Load servers from API
+        async function loadServers() {
+            try {
+                showToast('Загрузка серверов...', 'info');
+                
+                const response = await fetch('/api/servers');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                allServers = data.servers || [];
+                
+                // Add status field for future server status checking
+                allServers = allServers.map(server => ({
+                    ...server,
+                    status: 'unknown' // Will be updated by status checking endpoint in the future
+                }));
+                
+                filteredServers = [...allServers];
+                
+                renderServers();
+                updateStats();
+                
+                console.log('Servers loaded:', allServers.length);
+                showToast(`Загружено ${allServers.length} серверов`, 'success');
+                
+                // TODO: In the future, call checkServerStatuses() to get real status
+                // checkServerStatuses();
+                
+            } catch (error) {
+                console.error('Error loading servers:', error);
+                showToast('Ошибка загрузки серверов: ' + error.message, 'error');
+                
+                // Show empty state
+                allServers = [];
+                filteredServers = [];
+                renderServers();
+                updateStats();
+            }
+        }
+
+        // Future function for checking server statuses
+        // async function checkServerStatuses() {
+        //     try {
+        //         const response = await fetch('/api/server-status');
+        //         const statusData = await response.json();
+        //         
+        //         allServers = allServers.map(server => {
+        //             const status = statusData.find(s => s.ip === server.ip);
+        //             return {
+        //                 ...server,
+        //                 status: status ? status.status : 'unknown'
+        //             };
+        //         });
+        //         
+        //         renderServers();
+        //         updateStats();
+        //     } catch (error) {
+        //         console.error('Error checking server statuses:', error);
+        //     }
+        // }
+
+        // Setup event listeners
+        function setupEventListeners() {
+            // Close dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.action-menu-button') && !e.target.closest('.dropdown-menu')) {
+                    closeDropdown();
+                }
+            });
+
+            // Close modal when clicking overlay
+            document.getElementById('modalOverlay').addEventListener('click', (e) => {
+                if (e.target === e.currentTarget) {
+                    closeModal();
+                }
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeDropdown();
+                    closeModal();
+                }
+                if (e.key === 'Delete' && selectedServers.size > 0) {
+                    bulkDelete();
+                }
+                if (e.ctrlKey && e.key === 'a') {
+                    e.preventDefault();
+                    selectAllServers();
+                }
+            });
+        }
+
+        // Setup search
+        function setupSearch() {
+            const searchInput = document.getElementById('searchInput');
+            let searchTimeout;
+
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    filterServers(e.target.value);
+                }, 300);
+            });
+        }
+
+        // Filter servers
+        function filterServers(query) {
+            if (!query.trim()) {
+                filteredServers = [...allServers];
+            } else {
+                const searchTerm = query.toLowerCase();
+                filteredServers = allServers.filter(server => 
+                    server.ip.toLowerCase().includes(searchTerm) ||
+                    server.inbound.toLowerCase().includes(searchTerm) ||
+                    formatDate(server.install_date).toLowerCase().includes(searchTerm) ||
+                    getStatusText(server.status).toLowerCase().includes(searchTerm)
+                );
+            }
+            
+            renderServers();
+            updateStats();
+        }
+
+        // Render servers table
+        function renderServers() {
+            const tbody = document.getElementById('serversTableBody');
+            
+            if (!filteredServers.length) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="empty-state">
+                            <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+                            </svg>
+                            <div class="empty-title">Серверы не найдены</div>
+                            <div class="empty-description">Попробуйте изменить условия поиска или добавьте новый сервер</div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = filteredServers.map(server => `
+                <tr class="${selectedServers.has(server.ip) ? 'selected' : ''}" data-ip="${server.ip}">
+                    <td class="checkbox-cell">
+                        <label class="custom-checkbox">
+                            <input type="checkbox" 
+                                   ${selectedServers.has(server.ip) ? 'checked' : ''} 
+                                   onchange="toggleServerSelection('${server.ip}')">
+                            <span class="checkmark"></span>
+                        </label>
+                    </td>
+                    <td>
+                        <div class="server-ip">${server.ip}</div>
+                    </td>
+                    <td>${server.inbound}</td>
+                    <td>
+                        <span class="server-status status-${server.status}">
+                            <span class="status-dot"></span>
+                            ${getStatusText(server.status)}
+                        </span>
+                    </td>
+                    <td>${formatDate(server.install_date)}</td>
+                    <td class="actions-cell">
+                        <button class="action-menu-button" onclick="toggleDropdown(this, '${server.ip}')">
+                            <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/>
+                            </svg>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+
+            updateSelectionUI();
+        }
+
+        // Get status text
+        function getStatusText(status) {
+            switch (status) {
+                case 'online': return 'Онлайн';
+                case 'offline': return 'Офлайн';
+                default: return 'Неизвестно';
+            }
+        }
+
+        // Toggle server selection
+        function toggleServerSelection(ip) {
+            if (selectedServers.has(ip)) {
+                selectedServers.delete(ip);
+            } else {
+                selectedServers.add(ip);
+            }
+            
+            updateSelectionUI();
+            updateSelectedActions();
+        }
+
+        // Toggle select all
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('selectAll');
+            
+            if (selectAllCheckbox.checked) {
+                selectAllServers();
+            } else {
+                clearSelection();
+            }
+        }
+
+        // Select all servers
+        function selectAllServers() {
+            filteredServers.forEach(server => {
+                selectedServers.add(server.ip);
+            });
+            
+            updateSelectionUI();
+            updateSelectedActions();
+        }
+
+        // Clear selection
+        function clearSelection() {
+            selectedServers.clear();
+            updateSelectionUI();
+            updateSelectedActions();
+        }
+
+        // Update selection UI
+        function updateSelectionUI() {
+            const selectAllCheckbox = document.getElementById('selectAll');
+            const selectedCount = selectedServers.size;
+            const visibleCount = filteredServers.length;
+            
+            // Update select all checkbox
+            if (selectedCount === 0) {
+                selectAllCheckbox.checked = false;
+                selectAllCheckbox.indeterminate = false;
+            } else if (selectedCount === visibleCount && visibleCount > 0) {
+                selectAllCheckbox.checked = true;
+                selectAllCheckbox.indeterminate = false;
+            } else {
+                selectAllCheckbox.checked = false;
+                selectAllCheckbox.indeterminate = true;
+            }
+
+            // Update row selection
+            document.querySelectorAll('tbody tr').forEach(row => {
+                const ip = row.dataset.ip;
+                if (ip) {
+                    const isSelected = selectedServers.has(ip);
+                    
+                    row.classList.toggle('selected', isSelected);
+                    
+                    const checkbox = row.querySelector('input[type="checkbox"]');
+                    if (checkbox) {
+                        checkbox.checked = isSelected;
+                    }
+                }
+            });
+
+            updateStats();
+        }
+
+        // Update selected actions bar
+        function updateSelectedActions() {
+            const selectedActions = document.getElementById('selectedActions');
+            const selectedCount = document.getElementById('selectedCount');
+            
+            selectedCount.textContent = `${selectedServers.size} выбрано`;
+            
+            if (selectedServers.size > 0) {
+                selectedActions.classList.add('visible');
+            } else {
+                selectedActions.classList.remove('visible');
+            }
+        }
+
+        // Update statistics
+        function updateStats() {
+            const totalServers = document.getElementById('totalServers');
+            const onlineServers = document.getElementById('onlineServers');
+            const selectedServersCount = document.getElementById('selectedServers');
+            
+            const onlineCount = allServers.filter(s => s.status === 'online').length;
+            
+            totalServers.textContent = allServers.length;
+            onlineServers.textContent = onlineCount;
+            selectedServersCount.textContent = selectedServers.size;
+        }
+
+        // Sort table
+        function sortTable(field) {
+            const direction = currentSort.field === field && currentSort.direction === 'asc' ? 'desc' : 'asc';
+            
+            // Update sort indicators
+            document.querySelectorAll('th').forEach(th => {
+                th.classList.remove('active', 'asc', 'desc');
+            });
+            
+            const clickedTh = event.target.closest('th');
+            clickedTh.classList.add('active', direction);
+            
+            // Sort data
+            filteredServers.sort((a, b) => {
+                let aVal = a[field];
+                let bVal = b[field];
+                
+                if (field === 'install_date') {
+                    aVal = new Date(aVal);
+                    bVal = new Date(bVal);
+                } else if (typeof aVal === 'string') {
+                    aVal = aVal.toLowerCase();
+                    bVal = bVal.toLowerCase();
+                }
+                
+                if (direction === 'asc') {
+                    return aVal > bVal ? 1 : -1;
+                } else {
+                    return aVal < bVal ? 1 : -1;
+                }
+            });
+            
+            currentSort = { field, direction };
+            renderServers();
+        }
+
+        // Toggle dropdown menu
+        function toggleDropdown(button, ip) {
+            const dropdown = document.getElementById('dropdownMenu');
+            const wasActive = dropdown.classList.contains('active');
+            
+            closeDropdown();
+            
+            if (!wasActive) {
+                const rect = button.getBoundingClientRect();
+                
+                let top = rect.bottom + window.scrollY + 8;
+                let left = rect.right + window.scrollX - 200;
+                
+                // Adjust if off-screen
+                if (left < 0) left = rect.left + window.scrollX;
+                if (top + 120 > window.innerHeight + window.scrollY) {
+                    top = rect.top + window.scrollY - 120 - 8;
+                }
+                
+                dropdown.style.top = `${top}px`;
+                dropdown.style.left = `${left}px`;
+                dropdown.classList.add('active');
+                
+                // Set up dropdown actions
+                document.getElementById('restartAction').onclick = () => {
+                    restartServer(ip);
+                    closeDropdown();
+                };
+                
+                document.getElementById('editAction').onclick = () => {
+                    editServer(ip);
+                    closeDropdown();
+                };
+                
+                document.getElementById('deleteAction').onclick = () => {
+                    showDeleteModal([ip]);
+                    closeDropdown();
+                };
+            }
+        }
+
+        // Close dropdown
+        function closeDropdown() {
+            document.getElementById('dropdownMenu').classList.remove('active');
+        }
+
+        // Format date
+        function formatDate(dateString) {
+            if (!dateString) return 'Не указана';
+            
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleDateString('ru-RU', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch (e) {
+                return 'Неверная дата';
+            }
+        }
+
+        // Server actions using real API endpoints
+        async function restartServer(ip) {
+            try {
+                showToast(`Перезагрузка сервера ${ip}...`, 'info');
+                
+                const formData = new FormData();
+                formData.append('ip', ip);
+                
+                const response = await fetch('/api/reboot_server', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Ошибка перезагрузки');
+                }
+                
+                const result = await response.json();
+                showToast(`Сервер ${ip} успешно перезагружен`, 'success');
+                
+            } catch (error) {
+                console.error('Error restarting server:', error);
+                showToast(`Ошибка перезагрузки сервера ${ip}: ${error.message}`, 'error');
+            }
+        }
+
+        function editServer(ip) {
+            showToast(`Редактирование сервера ${ip} (функция в разработке)`, 'info');
+            // TODO: Implement edit functionality
+        }
+
+        // Bulk actions
+        async function bulkRestart() {
+            if (selectedServers.size === 0) return;
+            
+            const serverList = Array.from(selectedServers);
+            showToast(`Перезагрузка ${serverList.length} серверов...`, 'info');
+            
+            try {
+                const results = await Promise.allSettled(
+                    serverList.map(ip => {
+                        const formData = new FormData();
+                        formData.append('ip', ip);
+                        return fetch('/api/reboot_server', {
+                            method: 'POST',
+                            body: formData
+                        });
+                    })
+                );
+                
+                const successCount = results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+                const failCount = results.length - successCount;
+                
+                if (failCount === 0) {
+                    showToast(`${serverList.length} серверов успешно перезагружены`, 'success');
+                } else {
+                    showToast(`Перезагружено: ${successCount}, ошибок: ${failCount}`, 'error');
+                }
+                
+                clearSelection();
+            } catch (error) {
+                showToast('Ошибка при массовой перезагрузке', 'error');
+            }
+        }
+
+        function bulkDelete() {
+            if (selectedServers.size === 0) return;
+            showDeleteModal(Array.from(selectedServers));
+        }
+
+        // Modal functions
+        function showDeleteModal(ips) {
+            const modal = document.getElementById('modalOverlay');
+            const title = document.getElementById('modalTitle');
+            const description = document.getElementById('modalDescription');
+            const confirmButton = document.getElementById('modalConfirmButton');
+            
+            const isMultiple = ips.length > 1;
+            
+            title.textContent = isMultiple ? 'Удалить серверы' : 'Удалить сервер';
+            description.textContent = isMultiple 
+                ? `Вы уверены, что хотите удалить ${ips.length} серверов? Это действие нельзя отменить.`
+                : `Вы уверены, что хотите удалить сервер ${ips[0]}? Это действие нельзя отменить.`;
+            
+            confirmButton.textContent = isMultiple ? 'Удалить серверы' : 'Удалить сервер';
+            
+            currentModalAction = 'delete';
+            currentModalData = ips;
+            
+            modal.classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('modalOverlay').classList.remove('active');
+            currentModalAction = null;
+            currentModalData = null;
+        }
+
+        async function confirmModalAction() {
+            if (currentModalAction === 'delete' && currentModalData) {
+                await deleteServers(currentModalData);
+            }
+            closeModal();
+        }
+
+        async function deleteServers(ips) {
+            try {
+                showToast(`Удаление ${ips.length} серверов...`, 'info');
+                
+                const results = await Promise.allSettled(
+                    ips.map(ip => 
+                        fetch(`/api/delete_server?ip=${encodeURIComponent(ip)}`, {
+                            method: 'DELETE'
+                        })
+                    )
+                );
+                
+                const successCount = results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+                const failCount = results.length - successCount;
+                
+                if (successCount > 0) {
+                    // Remove successfully deleted servers from local data
+                    const successfullyDeleted = [];
+                    results.forEach((result, index) => {
+                        if (result.status === 'fulfilled' && result.value.ok) {
+                            successfullyDeleted.push(ips[index]);
+                        }
+                    });
+                    
+                    allServers = allServers.filter(server => !successfullyDeleted.includes(server.ip));
+                    filteredServers = filteredServers.filter(server => !successfullyDeleted.includes(server.ip));
+                    
+                    // Clear selection for deleted servers
+                    successfullyDeleted.forEach(ip => selectedServers.delete(ip));
+                    
+                    // Re-render
+                    renderServers();
+                    updateStats();
+                    updateSelectedActions();
+                }
+                
+                if (failCount === 0) {
+                    showToast(`${ips.length} серверов успешно удалены`, 'success');
+                } else {
+                    showToast(`Удалено: ${successCount}, ошибок: ${failCount}`, 'error');
+                }
+                
+            } catch (error) {
+                console.error('Error deleting servers:', error);
+                showToast('Ошибка при удалении серверов', 'error');
+            }
+        }
+
+        // Toast notifications
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <svg class="toast-icon" viewBox="0 0 24 24">
+                    ${type === 'success' ? 
+                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>' :
+                        type === 'error' ?
+                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>' :
+                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'
+                    }
+                </svg>
+                <div class="toast-message">${message}</div>
+            `;
+            
+            container.appendChild(toast);
+            
+            // Show toast
+            setTimeout(() => toast.classList.add('show'), 100);
+            
+            // Remove toast
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    if (container.contains(toast)) {
+                        container.removeChild(toast);
+                    }
+                }, 300);
+            }, 4000);
+        }
+
+        // Theme functions
+        function toggleTheme() {
+            const isDark = document.documentElement.hasAttribute('data-theme');
+            
+            if (isDark) {
+                document.documentElement.removeAttribute('data-theme');
+                localStorage.removeItem('theme');
+                showToast('Включена светлая тема', 'info');
+            } else {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                localStorage.setItem('theme', 'dark');
+                showToast('Включена темная тема', 'info');
+            }
+        }
+
+        function loadTheme() {
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+        }
+
+        // Navigation setup
+        function setupNav() {
+            // Navigation is now handled by actual links in the HTML
+            // This preserves the original functionality while using real URLs
+            console.log('Navigation setup complete');
+        }
+
+        // Refresh data periodically (for future status updates)
+        function startPeriodicRefresh() {
+            // Refresh server data every 5 minutes
+            setInterval(async () => {
+                try {
+                    // Only refresh if user is actively viewing the page
+                    if (!document.hidden) {
+                        await loadServers();
+                    }
+                } catch (error) {
+                    console.error('Periodic refresh failed:', error);
+                }
+            }, 5 * 60 * 1000); // 5 minutes
+        }
+
+        // Start periodic refresh when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            startPeriodicRefresh();
+        });
+
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                // Page became visible, refresh data
+                loadServers();
+            }
+        });
+
+        // Add keyboard shortcuts info
+        function showKeyboardShortcuts() {
+            showToast('Горячие клавиши: Ctrl+A - выбрать все, Delete - удалить выбранные, Esc - закрыть модальные окна', 'info');
+        }
+
+        // Add this to the header actions if needed
+        // <button class="action-button" onclick="showKeyboardShortcuts()">?</button>
+    </script>
+</body>
+</html>

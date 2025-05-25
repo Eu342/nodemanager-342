@@ -1,0 +1,149 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', Roboto, sans-serif;
+    background-color: #000000;
+    color: #E8ECEF;
+    margin: 0;
+    padding: 0;
+    line-height: 1.6;
+    font-size: 16px;
+}
+
+.container {
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 0 20px;
+}
+
+.navbar {
+    background-color: #1C2526;
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #2C3E50;
+}
+
+.navbar a {
+    color: #00A8E8;
+    text-decoration: none;
+    font-size: 15px;
+    font-weight: 500;
+    margin-left: 24px;
+    transition: color 0.2s ease;
+}
+
+.navbar a:hover {
+    color: #4CC9F0;
+}
+
+.navbar .brand {
+    font-size: 18px;
+    font-weight: 600;
+    color: #E8ECEF;
+}
+
+.alert {
+    padding: 12px 16px;
+    margin-bottom: 24px;
+    border-radius: 10px;
+    font-size: 14px;
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.alert.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.alert-success {
+    background-color: #34C759;
+    color: #000000;
+}
+
+.alert-error {
+    background-color: #FF3B30;
+    color: #FFFFFF;
+}
+
+h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 32px;
+    color: #E8ECEF;
+}
+
+input, select {
+    width: 100%;
+    padding: 12px;
+    background-color: #2C3E50;
+    border: 1px solid #4A5E74;
+    border-radius: 10px;
+    color: #E8ECEF;
+    font-size: 16px;
+    box-sizing: border-box;
+    transition: border-color 0.2s ease;
+}
+
+input:focus, select:focus {
+    outline: none;
+    border-color: #00A8E8;
+}
+
+label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 8px;
+    color: #A9B4BC;
+}
+
+button {
+    background: linear-gradient(135deg, #00A8E8, #0077B6);
+    color: #FFFFFF;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+button:hover {
+    background: linear-gradient(135deg, #4CC9F0, #0096C7);
+    transform: translateY(-2px);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: #1C2526;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+th, td {
+    text-align: left;
+    padding: 16px;
+    border-bottom: 1px solid #2C3E50;
+}
+
+th {
+    font-weight: 600;
+    color: #A9B4BC;
+    font-size: 14px;
+}
+
+td {
+    font-size: 15px;
+    color: #E8ECEF;
+}
+
+.empty {
+    color: #A9B4BC;
+    font-style: italic;
+    padding: 20px;
+    text-align: center;
+}
