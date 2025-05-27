@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NodeManager - Управление серверами</title>
+    <link rel="stylesheet" href="/static/css/server_list.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">N</div>
+                    <div class="logo-text">NodeManager</div>
+                </div>
+            </div>
+            <nav class="nav-items">
+                <a href="/nodemanager" class="nav-item" data-page="dashboard">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2v2zm0 0V5a2 2 0 012-2h6l2 2h6a2 2 0 012 2v2"/>
+                    </svg>
+                    <span>Главная</span>
+                </a>
+                <a href="/nodemanager/add" class="nav-item" data-page="add">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    <span>Добавить сервер</span>
+                </a>
+                <a href="/nodemanager/setup" class="nav-item" data-page="install">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                    </svg>
+                    <span>Настроить сервер</span>
+                </a>
+                <a href="/nodemanager/list" class="nav-item active" data-page="list">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    <span>Список серверов</span>
+                </a>
+            </nav>
+        </aside>
+        <main class="main-content">
+            <header class="content-header">
+                <div class="header-top">
+                    <h1 class="page-title">Управление серверами</h1>
+                    <div class="header-actions">
+                        <button class="action-button" onclick="history.back()">
+                            <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+                            </svg>
+                            Назад
+                        </button>
+                        <a href="/nodemanager/add" class="action-button primary">
+                            <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            Добавить сервер
+                        </a>
+                        <button class="action-button" onclick="toggleTheme()">
+                            <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="selected-actions" id="selectedActions">
+                    <span class="selected-count" id="selectedCount">0 выбрано</span>
+                    <select class="form-select" id="scriptSelect" onchange="updateRunButton()">
+                        <option value="">Выберите скрипт...</option>
+                    </select>
+                    <button class="action-button" id="runScriptButton" onclick="bulkRunScript()" disabled>
+                        <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <span id="runButtonText">Запустить скрипт</span>
+                    </button>
+                    <button class="action-button danger" onclick="bulkDelete()">
+                        <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                        Удалить выбранные
+                    </button>
+                    <button class="action-button" onclick="clearSelection()">
+                        Отменить выбор
+                    </button>
+                </div>
+            </header>
+            <section class="stats-grid">
+                <div class="stat-card">
+                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+                    </svg>
+                    <div class="stat-value" id="totalServers">
+                        <span class="loading"><span class="spinner"></span> Загрузка...</span>
+                    </div>
+                    <div class="stat-label">Всего серверов</div>
+                </div>
+                <div class="stat-card">
+                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                    <div class="stat-value" id="onlineServers">
+                        <span class="loading"><span class="spinner"></span> Загрузка...</span>
+                    </div>
+                    <div class="stat-label">Онлайн</div>
+                </div>
+                <div class="stat-card">
+                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <div class="stat-value" id="selectedServers">0</div>
+                    <div class="stat-label">Выбрано</div>
+                </div>
+            </section>
+            <section class="search-section">
+                <div class="search-container">
+                    <input type="text" class="search-input" id="searchInput" placeholder="Поиск по IP, инбаунду или дате...">
+                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                </div>
+            </section>
+            <section class="table-section">
+                <div class="table-container">
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="checkbox-cell">
+                                        <label class="custom-checkbox">
+                                            <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                                            <span class="checkmark"></span>
+                                        </label>
+                                    </th>
+                                    <th class="sortable" onclick="sortTable('ip')">
+                                        IP адрес
+                                        <svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </th>
+                                    <th class="sortable" onclick="sortTable('inbound')">
+                                        Инбаунд
+                                        <svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </th>
+                                    <th class="sortable" onclick="sortTable('status')">
+                                        Статус
+                                        <svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </th>
+                                    <th class="sortable" onclick="sortTable('install_date')">
+                                        Дата установки
+                                        <svg class="sort-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                        </svg>
+                                    </th>
+                                    <th class="actions-cell"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="serversTableBody">
+                                <tr>
+                                    <td colspan="6" class="empty-state">
+                                        <div class="loading"><span class="spinner"></span> Загрузка серверов...</div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <div class="dropdown-menu" id="dropdownMenu">
+        <div class="dropdown-item" id="runScriptAction">
+            <svg class="dropdown-icon" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            Запустить скрипт
+        </div>
+        <div class="dropdown-item" id="editAction">
+            <svg class="dropdown-icon" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+            Редактировать
+        </div>
+        <div class="dropdown-item danger" id="deleteAction">
+            <svg class="dropdown-icon" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+            Удалить сервер
+        </div>
+    </div>
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalTitle">Подтвердите действие</h3>
+                <p class="modal-description" id="modalDescription"></p>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-button secondary" onclick="closeModal()">Отмена</button>
+                <button class="modal-button primary" id="modalConfirmButton" onclick="confirmModalAction()">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/static/js/server_list.js"></script>
+</body>
+</html>

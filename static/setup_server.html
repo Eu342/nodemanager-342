@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настроить сервер - NodeManager</title>
+    <link rel="stylesheet" href="/static/css/setup_server.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">N</div>
+                    <div class="logo-text">NodeManager</div>
+                </div>
+            </div>
+            <nav class="nav-items">
+                <a href="/nodemanager" class="nav-item" data-page="dashboard">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2v2zm0 0V5a2 2 0 012-2h6l2 2h6a2 2 0 012 2v2"/>
+                    </svg>
+                    <span>Главная</span>
+                </a>
+                <a href="/nodemanager/add" class="nav-item" data-page="add">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    <span>Добавить сервер</span>
+                </a>
+                <a href="/nodemanager/setup" class="nav-item active" data-page="install">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                    </svg>
+                    <span>Настроить сервер</span>
+                </a>
+                <a href="/nodemanager/list" class="nav-item" data-page="list">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    <span>Список серверов</span>
+                </a>
+            </nav>
+        </aside>
+        <main class="main-content">
+            <header class="content-header">
+                <div class="header-content">
+                    <h1 class="page-title">Настроить серверы</h1>
+                    <div class="header-actions">
+                        <button class="action-button" onclick="history.back()">
+                            <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                            </svg>
+                            Назад
+                        </button>
+                        <button class="action-button" onclick="toggleTheme()">
+                            <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </header>
+            <section class="form-section">
+                <div class="form-container">
+                    <div class="form-card">
+                        <div class="form-header">
+                            <h2 class="form-title">Настроить серверы</h2>
+                            <p class="form-description">Настройте серверы с выбранной конфигурацией инбаунда</p>
+                        </div>
+                        <div id="alert" class="alert"></div>
+                        <form id="setupServerForm">
+                            <div class="form-field">
+                                <label class="field-label" for="inbound">Инбаунд</label>
+                                <div class="field-description">Выберите тип конфигурации для всех серверов</div>
+                                <select class="form-select" id="inbound" name="inbound" required>
+                                    <option value="">Загрузка инбаундов...</option>
+                                </select>
+                            </div>
+                            <div class="form-field">
+                                <label class="field-label">IP адреса серверов</label>
+                                <div class="field-description">Введите IP адреса и нажимайте Enter после каждого</div>
+                                <div class="ip-tags-input" id="ipTagsInput">
+                                    <input type="text" class="ip-input" id="ipInput" placeholder="Введите IP адрес...">
+                                </div>
+                                <div class="ip-counter">
+                                    <div class="counter-item">
+                                        <span class="counter-dot"></span>
+                                        <span>Всего IP: <strong id="ipCount">0</strong></span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="submit-section">
+                                <button type="submit" class="submit-button" id="submitButton" disabled>
+                                    <div class="button-content">
+                                        <span id="buttonText">Настроить серверы</span>
+                                    </div>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <div class="toast-container" id="toastContainer"></div>
+    <script src="/static/js/setup_server.js"></script>
+</body>
+</html>
