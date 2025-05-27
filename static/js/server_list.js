@@ -18,12 +18,26 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadServers() {
     try {
         showToast('Загрузка серверов...', 'info');
-        const response = await fetch('/api/servers');
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const data = await response.json();
-        allServers = data.servers || [];
-        allServers = allServers.map(server => ({ ...server, status: 'unknown' }));
+        const [serversResponse, statusesResponse] = await Promise.all([
+            fetch('/api/servers'),
+            fetch('/api/server_status')
+        ]);
+        if (!serversResponse.ok) throw new Error(`HTTP error! status: ${serversResponse.status}`);
+        if (!statusesResponse.ok) throw new Error(`HTTP error! status: ${statusesResponse.status}`);
+        const serversData = await serversResponse.json();
+        const statusesData = await statusesResponse.json();
+        allServers = serversData.servers || [];
+        const statuses = statusesData.statuses || {};
+        let missingServers = [];
+        allServers = allServers.map(server => {
+            const status = statuses[server.ip] || 'offline';
+            if (!statuses[server.ip]) missingServers.push(server.ip);
+            return { ...server, status };
+        });
         filteredServers = [...allServers];
+        if (missingServers.length > 0) {
+            showAlert(`Серверы не найдены в Xray Checker: ${missingServers.join(', ')}`, 'error');
+        }
         renderServers();
         updateStats();
         console.log('Servers loaded:', allServers.length);
@@ -538,6 +552,19 @@ async function deleteServers(ips) {
 function bulkDelete() {
     if (selectedServers.size === 0) return;
     showDeleteModal(Array.from(selectedServers));
+}
+
+function showAlert(message, type = 'info') {
+    const alert = document.getElementById('alert');
+    if (alert) {
+        alert.textContent = message;
+        alert.className = `alert ${type}`;
+        setTimeout(() => {
+            alert.className = 'alert';
+        }, 5000);
+    } else {
+        showToast(message, type);
+    }
 }
 
 function showToast(message, type = 'info') {

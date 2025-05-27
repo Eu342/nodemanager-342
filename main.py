@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from db import get_remote_inbounds, add_server, get_servers, init_db, delete_server
 from ssh_utils import deploy_script, check_server_availability
 from config import Config
+import aiohttp
+from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -48,6 +50,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+load_dotenv()
+XRAY_CHECKER_URL = f"http://{os.getenv('XRAY_CHECKER_HOST')}:{os.getenv('XRAY_CHECKER_PORT')}"
 
 @app.get("/nodemanager", response_class=HTMLResponse)
 async def index():
@@ -295,3 +300,33 @@ async def check_availability_api(ip: str):
         raise HTTPException(status_code=400, detail="Invalid IP address")
     is_available = await check_server_availability(ip)
     return {"ip": ip, "available": is_available}
+
+@app.get("/api/server_status")
+async def get_server_status():
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.get(f"{XRAY_CHECKER_URL}/metrics") as response:
+                logger.info(f"Xray Checker /metrics status: {response.status}")
+                if response.status != 200:
+                    logger.error(f"Xray Checker returned status: {response.status}, reason: {response.reason}")
+                    return {"statuses": {}}
+                metrics = await response.text()
+                logger.debug(f"Xray Checker metrics response: {metrics[:500]}")
+        
+        statuses = {}
+        pattern = r'xray_proxy_status\{[^}]*address="([^:]+):\d+"[^}]*protocol="[^"]+"[^}]*\} (\d)'
+        for line in metrics.splitlines():
+            logger.debug(f"Parsing metric line: {line}")
+            match = re.match(pattern, line)
+            if match:
+                ip, status = match.groups()
+                statuses[ip] = "online" if status == "1" else "offline"
+                logger.debug(f"Matched IP: {ip}, Status: {status}")
+            else:
+                logger.debug(f"No match for line: {line}")
+        
+        logger.info(f"Parsed statuses: {statuses}")
+        return {"statuses": statuses}
+    except Exception as e:
+        logger.error(f"Error fetching Xray Checker metrics: {str(e)}")
+        return {"statuses": {}}
