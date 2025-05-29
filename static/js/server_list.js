@@ -109,7 +109,7 @@ function filterServers(query) {
         const searchTerm = query.toLowerCase();
         filteredServers = allServers.filter(server => 
             server.ip.toLowerCase().includes(searchTerm) ||
-            server.inbound.toLowerCase().includes(searchTerm) ||
+            server.inbound_tag.toLowerCase().includes(searchTerm) ||
             formatDate(server.install_date).toLowerCase().includes(searchTerm) ||
             getStatusText(server.status).toLowerCase().includes(searchTerm)
         );
@@ -143,7 +143,7 @@ function renderServers() {
                 </label>
             </td>
             <td><div class="server-ip">${server.ip}</div></td>
-            <td>${server.inbound}</td>
+            <td>${server.inbound_tag}</td>
             <td>
                 <span class="server-status status-${server.status}">
                     <span class="status-dot"></span> ${getStatusText(server.status)}

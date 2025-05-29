@@ -8,3 +8,4 @@ python-dotenv==1.0.1
 python-multipart==0.0.12
 pydantic==2.8.2
 aiohttp==3.9.1
+apscheduler==3.10.4

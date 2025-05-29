@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настройки - NodeManager</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --bg-tertiary: #ffffff;
+            --bg-elevated: #ffffff;
+            --bg-glass: rgba(255, 255, 255, 0.85);
+            --text-primary: #0f1419;
+            --text-secondary: #657786;
+            --text-tertiary: #8b98a5;
+            --text-muted: #aab8c2;
+            --border-light: #f7f9fa;
+            --border-medium: #e1e8ed;
+            --border-strong: #cfd9de;
+            --accent: #1d9bf0;
+            --accent-hover: #1a8cd8;
+            --accent-light: rgba(29, 155, 240, 0.1);
+            --accent-subtle: rgba(29, 155, 240, 0.04);
+            --success: #00ba7c;
+            --success-light: rgba(0, 186, 124, 0.1);
+            --warning: #f7931e;
+            --warning-light: rgba(247, 147, 30, 0.1);
+            --danger: #f4212e;
+            --danger-light: rgba(244, 33, 46, 0.1);
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+            --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.15);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+            --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-slow: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            --glass-blur: blur(20px);
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #000000;
+            --bg-secondary: #16181c;
+            --bg-tertiary: #1c1f23;
+            --bg-elevated: #202327;
+            --bg-glass: rgba(0, 0, 0, 0.8);
+            --text-primary: #e7e9ea;
+            --text-secondary: #71767b;
+            --text-tertiary: #71767b;
+            --text-muted: #5b7083;
+            --border-light: #2f3336;
+            --border-medium: #3e4144;
+            --border-strong: #536471;
+            --accent-subtle: rgba(29, 155, 240, 0.08);
+            --shadow-sm: 0 1px 3px rgba(255, 255, 255, 0.04);
+            --shadow-md: 0 4px 12px rgba(255, 255, 255, 0.06);
+            --shadow-lg: 0 8px 24px rgba(255, 255, 255, 0.08);
+            --shadow-xl: 0 20px 60px rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+            transition: var(--transition);
+            overflow-x: hidden;
+        }
+
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary));
+        }
+
+        .sidebar {
+            width: 280px;
+            background: var(--bg-glass);
+            backdrop-filter: var(--glass-blur);
+            border-right: 1px solid var(--border-light);
+            padding: 24px 0;
+            position: fixed;
+            height: 100vh;
+            z-index: 100;
+            transition: var(--transition-slow);
+        }
+
+        .sidebar-header {
+            padding: 0 24px 24px;
+            border-bottom: 1px solid var(--border-light);
+            margin-bottom: 24px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent) 0%, #1a8cd8);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 16px;
+            box-shadow: var(--shadow-md);
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+        }
+
+        .nav-items {
+            padding: 0 16px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            margin-bottom: 2px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: var(--transition);
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 15px;
+            position: relative;
+            overflow: hidden;
+            text-decoration: none;
+        }
+
+        .nav-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--accent-subtle);
+            opacity: 0;
+            transition: var(--transition);
+        }
+
+        .nav-item:hover::before {
+            opacity: 1;
+        }
+
+        .nav-item:hover {
+            color: var(--text-primary);
+            transform: translateX(2px);
+        }
+
+        .nav-item.active {
+            background: var(--accent);
+            color: white;
+            box-shadow: var(--shadow-md);
+        }
+
+        .nav-item.active::before {
+            display: none;
+        }
+
+        .nav-item-icon {
+            width: 20px;
+            height: 20px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            position: relative;
+            z-index: 1;
+        }
+
+        .main-content {
+            margin-left: 280px;
+            flex: 1;
+            background: var(--bg-primary);
+            min-height: 100vh;
+        }
+
+        .content-header {
+            position: sticky;
+            top: 0;
+            background: var(--bg-glass);
+            backdrop-filter: var(--glass-blur);
+            border-bottom: 1px solid var(--border-light);
+            padding: 20px 32px;
+            z-index: 50;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .page-title {
+            font-size: 32px;
+            font-weight: 800;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .settings-section {
+            padding: 32px;
+            display: flex;
+            justify-content: flex-start;
+            min-height: calc(100vh - 80px);
+        }
+
+        .settings-container {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .settings-sidebar {
+            width: 100%;
+        }
+
+        .settings-nav {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            padding: 6px;
+            box-shadow: var(--shadow-md);
+            display: inline-flex;
+            gap: 2px;
+            backdrop-filter: var(--glass-blur);
+            width: fit-content;
+            margin-bottom: 32px;
+        }
+
+        .settings-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 24px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: var(--transition);
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 15px;
+            position: relative;
+            overflow: hidden;
+            text-decoration: none;
+            white-space: nowrap;
+            background: transparent;
+        }
+
+        .settings-nav-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--accent-subtle);
+            opacity: 0;
+            transition: var(--transition);
+            border-radius: var(--radius-md);
+        }
+
+        .settings-nav-item:hover::before {
+            opacity: 1;
+        }
+
+        .settings-nav-item:hover {
+            color: var(--text-primary);
+        }
+
+        .settings-nav-item.active {
+            background: var(--accent);
+            color: white;
+            box-shadow: var(--shadow-md);
+        }
+
+        .settings-nav-item.active::before {
+            display: none;
+        }
+
+        .settings-nav-icon {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+            position: relative;
+            z-index: 1;
+        }
+
+        .settings-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .settings-section-content {
+            display: none;
+        }
+
+        .settings-section-content.active {
+            display: block;
+        }
+
+        .form-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            padding: 40px;
+            box-shadow: var(--shadow-md);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .form-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent) 0%, var(--success));
+        }
+
+        .form-header {
+            margin-bottom: 32px;
+        }
+
+        .form-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            letter-spacing: -0.02em;
+        }
+
+        .form-description {
+            color: var(--text-secondary);
+            font-size: 16px;
+            line-height: 1.5;
+        }
+
+        .form-field {
+            margin-bottom: 24px;
+        }
+
+        .field-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .field-description {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 16px 20px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-light);
+            border-radius: var(--radius-md);
+            font-size: 16px;
+            color: var(--text-primary);
+            transition: var(--transition);
+            font-weight: 400;
+            font-family: inherit;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 4px var(--accent-light);
+            background: var(--bg-primary);
+        }
+
+        .form-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border-light);
+        }
+
+        .action-button {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 20px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: var(--transition);
+            font-weight: 500;
+            font-size: 14px;
+            text-decoration: none;
+            border: none;
+            font-family: inherit;
+        }
+
+        .action-button.primary {
+            background: linear-gradient(135deg, var(--accent) 0%, #1a8cd8);
+            color: white;
+            box-shadow: var(--shadow-md);
+        }
+
+        .action-button.primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .action-button.secondary {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-medium);
+            color: var(--text-primary);
+        }
+
+        .action-button.secondary:hover {
+            background: var(--bg-tertiary);
+            border-color: var(--border-strong);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .action-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .action-button.loading {
+            pointer-events: none;
+        }
+
+        .loading-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .alert {
+            padding: 16px 20px;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 24px;
+            display: none;
+            border-left: 4px solid;
+        }
+
+        .alert.success {
+            background: var(--success-light);
+            color: var(--success);
+            border-color: var(--success);
+            display: block;
+        }
+
+        .alert.error {
+            background: var(--danger-light);
+            color: var(--danger);
+            border-color: var(--danger);
+            display: block;
+        }
+
+        .coming-soon {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        .coming-soon svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 16px;
+            stroke: var(--text-muted);
+        }
+
+        .coming-soon p {
+            font-size: 18px;
+            font-weight: 500;
+            margin: 0;
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 3000;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .toast {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-medium);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            min-width: 320px;
+            opacity: 0;
+            transform: translateX(100px);
+            transition: var(--transition-slow);
+            backdrop-filter: var(--glass-blur);
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--success);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--danger);
+        }
+
+        .toast.info {
+            border-left: 4px solid var(--accent);
+        }
+
+        .toast-icon {
+            width: 20px;
+            height: 20px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+        }
+
+        .toast.success .toast-icon {
+            color: var(--success);
+        }
+
+        .toast.error .toast-icon {
+            color: var(--danger);
+        }
+
+        .toast.info .toast-icon {
+            color: var(--accent);
+        }
+
+        .toast-message {
+            flex: 1;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        @media (max-width: 1024px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .sidebar.mobile-open {
+                transform: translateX(0);
+            }
+            .main-content {
+                margin-left: 0;
+            }
+            .settings-container {
+                flex-direction: column;
+                gap: 24px;
+            }
+            .settings-sidebar {
+                width: 100%;
+            }
+            .settings-nav {
+                position: static;
+                display: flex;
+                gap: 8px;
+                overflow-x: auto;
+                padding: 12px;
+            }
+            .settings-nav-item {
+                flex-shrink: 0;
+                margin-bottom: 0;
+                margin-right: 8px;
+            }
+            .settings-nav-item:last-child {
+                margin-right: 0;
+            }
+            .settings-section {
+                padding: 24px;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .page-title {
+                font-size: 24px;
+            }
+            .settings-section {
+                padding: 16px;
+            }
+            .form-card {
+                padding: 24px;
+            }
+            .form-header {
+                margin-bottom: 24px;
+            }
+            .form-title {
+                font-size: 20px;
+            }
+            .form-actions {
+                flex-direction: column;
+            }
+            .action-button {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">N</div>
+                    <div class="logo-text">NodeManager</div>
+                </div>
+            </div>
+            <nav class="nav-items">
+                <a href="/nodemanager" class="nav-item" data-page="dashboard">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2v2zm0 0V5a2 2 0 012-2h6l2 2h6a2 2 0 012 2v2"/>
+                    </svg>
+                    <span>Главная</span>
+                </a>
+                <a href="/nodemanager/add" class="nav-item" data-page="add">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    <span>Добавить сервер</span>
+                </a>
+                <a href="/nodemanager/setup" class="nav-item" data-page="install">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                    </svg>
+                    <span>Настроить сервер</span>
+                </a>
+                <a href="/nodemanager/list" class="nav-item" data-page="list">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    <span>Список серверов</span>
+                </a>
+                <a href="/nodemanager/settings/subscription" class="nav-item active" data-page="settings">
+                    <svg class="nav-item-icon" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    </svg>
+                    <span>Настройки</span>
+                </a>
+            </nav>
+        </aside>
+        <main class="main-content">
+            <header class="content-header">
+                <div class="header-content">
+                    <h1 class="page-title">Настройки</h1>
+                    <div class="header-actions">
+                        <button class="action-button" onclick="history.back()">
+                            <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                            </svg>
+                            Назад
+                        </button>
+                        <button class="action-button" onclick="toggleTheme()">
+                            <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </header>
+            <section class="settings-section">
+                <div class="settings-container">
+                    <div class="settings-sidebar">
+                        <nav class="settings-nav">
+                            <a href="#subscription" class="settings-nav-item active" data-section="subscription">
+                                <svg class="settings-nav-icon" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                </svg>
+                                <span>Подписка</span>
+                            </a>
+                            <a href="#general" class="settings-nav-item" data-section="general">
+                                <svg class="settings-nav-icon" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"/>
+                                </svg>
+                                <span>Общие</span>
+                            </a>
+                            <a href="#security" class="settings-nav-item" data-section="security">
+                                <svg class="settings-nav-icon" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <span>Безопасность</span>
+                            </a>
+                        </nav>
+                    </div>
+                    <div class="settings-content">
+                        <div class="settings-section-content active" id="subscription-section">
+                            <div class="form-card">
+                                <div class="form-header">
+                                    <h2 class="form-title">Управление подпиской</h2>
+                                    <p class="form-description">Настройте URL подписки для автоматического обновления ключей VLESS</p>
+                                </div>
+                                <div id="alert" class="alert"></div>
+                                <form id="subscriptionForm">
+                                    <div class="form-field">
+                                        <label class="field-label" for="subscriptionUrl">URL подписки</label>
+                                        <div class="field-description">Введите URL для получения ключей VLESS подписки</div>
+                                        <input type="url" id="subscriptionUrl" class="form-input" placeholder="https://example.com/subscription">
+                                    </div>
+                                    <div class="form-actions">
+                                        <button type="button" class="action-button secondary" id="refreshButton">
+                                            <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                            </svg>
+                                            Обновить ключи
+                                        </button>
+                                        <button type="submit" class="action-button primary" id="saveButton">
+                                            <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
+                                            </svg>
+                                            Сохранить
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                        <div class="settings-section-content" id="general-section">
+                            <div class="coming-soon">
+                                <svg viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <p>Общие настройки скоро появятся</p>
+                            </div>
+                        </div>
+                        <div class="settings-section-content" id="security-section">
+                            <div class="coming-soon">
+                                <svg viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <p>Настройки безопасности скоро появятся</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <div class="toast-container" id="toastContainer"></div>
+    <script>
+        async function loadSettings() {
+            try {
+                console.log('settings_subscription.js: Fetching settings from /api/settings');
+                const response = await fetch('/api/settings');
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+                console.log('settings_subscription.js: Settings data:', data);
+                document.getElementById('subscriptionUrl').value = data.subscription_url || '';
+            } catch (error) {
+                console.error('settings_subscription.js: Error loading settings:', error);
+                showToast('Ошибка загрузки настроек: ' + error.message, 'error');
+            }
+        }
+
+        async function saveSettings(e) {
+            e.preventDefault();
+            const saveButton = document.getElementById('saveButton');
+            const buttonText = saveButton.querySelector('span') || saveButton;
+            const originalText = buttonText.textContent;
+            saveButton.classList.add('loading');
+            buttonText.innerHTML = '<div class="loading-spinner"></div>Сохранение...';
+            saveButton.disabled = true;
+            try {
+                const subscriptionUrl = document.getElementById('subscriptionUrl').value;
+                console.log('settings_subscription.js: Saving settings:', { subscription_url: subscriptionUrl });
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subscription_url: subscriptionUrl })
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+                }
+                showAlert('Настройки сохранены', 'success');
+                showToast('Настройки сохранены', 'success');
+                await refreshKeys();
+            } catch (error) {
+                console.error('settings_subscription.js: Error saving settings:', error);
+                showAlert('Ошибка сохранения настроек: ' + error.message, 'error');
+                showToast('Ошибка сохранения настроек: ' + error.message, 'error');
+            } finally {
+                saveButton.classList.remove('loading');
+                buttonText.textContent = originalText;
+                saveButton.disabled = false;
+            }
+        }
+
+        async function refreshKeys() {
+            const refreshButton = document.getElementById('refreshButton');
+            const buttonText = refreshButton.querySelector('span') || refreshButton;
+            const originalText = buttonText.textContent;
+            refreshButton.classList.add('loading');
+            buttonText.innerHTML = '<div class="loading-spinner"></div>Обновление...';
+            refreshButton.disabled = true;
+            try {
+                console.log('settings_subscription.js: Refreshing VLESS keys');
+                const response = await fetch('/api/refresh_keys', { method: 'POST' });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+                }
+                showAlert('Ключи обновлены', 'success');
+                showToast('Ключи обновлены', 'success');
+            } catch (error) {
+                console.error('settings_subscription.js: Error refreshing keys:', error);
+                showAlert('Ошибка обновления ключей: ' + error.message, 'error');
+                showToast('Ошибка обновления ключей: ' + error.message, 'error');
+            } finally {
+                refreshButton.classList.remove('loading');
+                buttonText.textContent = originalText;
+                refreshButton.disabled = false;
+            }
+        }
+
+        function showAlert(message, type) {
+            const alert = document.getElementById('alert');
+            alert.textContent = message;
+            alert.className = `alert ${type}`;
+            setTimeout(() => {
+                alert.className = 'alert';
+            }, 5000);
+        }
+
+        function showToast(message, type) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <svg class="toast-icon" viewBox="0 0 24 24">
+                    ${type === 'success' ? 
+                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>' :
+                        type === 'error' ?
+                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>' :
+                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'
+                    }
+                </svg>
+                <div class="toast-message">${message}</div>
+            `;
+            container.appendChild(toast);
+            setTimeout(() => toast.classList.add('show'), 100);
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    if (container.contains(toast)) {
+                        container.removeChild(toast);
+                    }
+                }, 300);
+            }, 4000);
+        }
+
+        function toggleTheme() {
+            const isDark = document.documentElement.hasAttribute('data-theme');
+            if (isDark) {
+                document.documentElement.removeAttribute('data-theme');
+                localStorage.removeItem('theme');
+                showToast('Включена светлая тема', 'info');
+            } else {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                localStorage.setItem('theme', 'dark');
+                showToast('Включена тёмная тема', 'info');
+            }
+        }
+
+        function switchSection(section) {
+            document.querySelectorAll('.settings-nav-item').forEach(item => {
+                item.classList.remove('active');
+                if (item.getAttribute('data-section') === section) {
+                    item.classList.add('active');
+                }
+            });
+            document.querySelectorAll('.settings-section-content').forEach(content => {
+                content.classList.remove('active');
+                if (content.id === `${section}-section`) {
+                    content.classList.add('active');
+                }
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('settings_subscription.js: DOM loaded');
+            loadSettings();
+            if (localStorage.getItem('theme') === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+
+            const form = document.getElementById('subscriptionForm');
+            if (form) {
+                form.addEventListener('submit', saveSettings);
+            } else {
+                console.error('settings_subscription.js: Form element not found');
+                showToast('Ошибка: форма не найдена', 'error');
+            }
+
+            const refreshButton = document.getElementById('refreshButton');
+            if (refreshButton) {
+                refreshButton.addEventListener('click', refreshKeys);
+            } else {
+                console.error('settings_subscription.js: Refresh button not found');
+            }
+
+            document.querySelectorAll('.settings-nav-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const section = item.getAttribute('data-section');
+                    switchSection(section);
+                    history.pushState(null, '', `#${section}`);
+                });
+            });
+
+            const hash = window.location.hash.replace('#', '');
+            if (hash) {
+                switchSection(hash);
+            }
+        });
+    </script>
+</body>
+</html>

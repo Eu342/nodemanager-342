@@ -2,6 +2,7 @@ let availableInbounds = [];
 let ipTags = [];
 
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('add_server.js: DOM loaded');
     loadInbounds();
     setupEventListeners();
     setupIPTagsInput();
@@ -10,18 +11,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function loadInbounds() {
     try {
-        const response = await fetch('/api/inbounds');
+        console.log('add_server.js: Fetching /api/vless_keys');
+        const response = await fetch('/api/vless_keys');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
-        availableInbounds = data.inbounds || [];
+        console.log('add_server.js: Received vless_keys:', data);
+        availableInbounds = data.data || [];
         populateInboundSelect();
     } catch (error) {
-        showToast('Ошибка загрузки инбаундов: ' + error.message, 'error');
+        console.error('add_server.js: Error loading locations:', error);
+        showToast('Ошибка загрузки локаций: ' + error.message, 'error');
         const select = document.getElementById('inbound');
         if (select) {
-            select.innerHTML = '<option value="">Ошибка загрузки инбаундов</option>';
+            select.innerHTML = '<option value="">Ошибка загрузки локаций</option>';
         }
     }
 }
@@ -29,29 +33,41 @@ async function loadInbounds() {
 function populateInboundSelect() {
     const select = document.getElementById('inbound');
     if (!select) {
+        console.error('add_server.js: Select element not found');
         return;
     }
     if (availableInbounds.length === 0) {
-        select.innerHTML = '<option value="">Инбаунды не найдены</option>';
+        select.innerHTML = '<option value="">Локации не найдены</option>';
         return;
     }
-    select.innerHTML = '<option value="">Выберите инбаунд...</option>' + 
+    select.innerHTML = '<option value="">Выберите локацию...</option>' + 
         availableInbounds.map(inbound => 
-            `<option value="${inbound}">${inbound}</option>`
+            `<option value="${inbound.inbound_tag}">${inbound.inbound_tag}</option>`
         ).join('');
 }
 
 function setupEventListeners() {
+    console.log('add_server.js: Setting up event listeners');
     const form = document.getElementById('addServerForm');
     if (form) {
+        console.log('add_server.js: Form element found:', form);
         form.addEventListener('submit', handleSubmit);
+    } else {
+        console.error('add_server.js: Form element with ID "addServerForm" not found');
+        showToast('Ошибка: форма не найдена на странице', 'error');
+        // Log all forms to debug
+        const forms = document.getElementsByTagName('form');
+        console.log('add_server.js: Available forms:', forms.length, Array.from(forms).map(f => f.id));
     }
 }
 
 function setupIPTagsInput() {
+    console.log('add_server.js: Setting up IP tags input');
     const container = document.getElementById('ipTagsInput');
     const input = document.getElementById('ipInput');
     if (!container || !input) {
+        console.error('add_server.js: IP tags input or container not found');
+        showToast('Ошибка: элементы ввода IP не найдены', 'error');
         return;
     }
 
@@ -152,13 +168,14 @@ function setupIPTagsInput() {
 
 async function handleSubmit(e) {
     e.preventDefault();
+    console.log('add_server.js: Form submitted');
     const submitButton = document.getElementById('submitButton');
     const buttonText = document.getElementById('buttonText');
     const originalText = buttonText.textContent;
     const inbound = document.getElementById('inbound').value;
     if (!inbound) {
-        showAlert('Выберите инбаунд', 'error');
-        showToast('Инбаунд обязателен', 'error');
+        showAlert('Выберите локацию', 'error');
+        showToast('Локация обязательна', 'error');
         return;
     }
     if (ipTags.length === 0) {
@@ -170,18 +187,25 @@ async function handleSubmit(e) {
     buttonText.innerHTML = '<div class="loading-spinner"></div>Добавление...';
     submitButton.disabled = true;
     try {
-        const formData = new FormData();
-        ipTags.forEach(ip => formData.append('ips', ip));
-        formData.append('inbound', inbound);
+        console.log('add_server.js: Sending request to /api/add_server_manual with:', { ips: ipTags, inbound_tag: inbound });
         const response = await fetch('/api/add_server_manual', {
             method: 'POST',
-            body: formData
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ips: ipTags, inbound_tag: inbound })
         });
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+            let errorMessage = `HTTP error! status: ${response.status}`;
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData.detail || errorMessage;
+            } catch {
+                // No JSON response
+            }
+            console.error('add_server.js: Error response:', errorMessage);
+            throw new Error(errorMessage);
         }
         const data = await response.json();
+        console.log('add_server.js: Response from /api/add_server_manual:', data);
         const results = data.results || [];
         let successCount = 0;
         let errorCount = 0;
@@ -189,6 +213,7 @@ async function handleSubmit(e) {
             if (result.success) {
                 successCount++;
             } else {
+                console.error(`add_server.js: Error adding ${result.ip}: ${result.message}`);
                 errorCount++;
             }
         });
@@ -206,11 +231,12 @@ async function handleSubmit(e) {
             showToast(`Частично выполнено: ${successCount} успешно, ${errorCount} ошибок`, 'error');
         } else {
             showAlert(`Ошибка добавления серверов: ${errorCount} ошибок`, 'error');
-            showToast('Не удалось добавить серверы', 'error');
+            showToast('Не удалось добавить серверы: ' + (results[0]?.message || 'Неизвестная ошибка'), 'error');
         }
     } catch (error) {
+        console.error('add_server.js: Error adding servers:', error);
         showAlert('Ошибка при добавлении серверов: ' + error.message, 'error');
-        showToast('Ошибка подключения', 'error');
+        showToast('Ошибка подключения: ' + error.message, 'error');
     } finally {
         submitButton.classList.remove('loading');
         buttonText.textContent = originalText;
@@ -265,7 +291,7 @@ function toggleTheme() {
     } else {
         document.documentElement.setAttribute('data-theme', 'dark');
         localStorage.setItem('theme', 'dark');
-        showToast('Включена темная тема', 'info');
+        showToast('Включена тёмная тема', 'info');
     }
 }
 
