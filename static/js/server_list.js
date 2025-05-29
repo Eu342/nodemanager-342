@@ -7,7 +7,7 @@ let currentModalData = null;
 let availableScripts = [];
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM loaded');
+    console.log('server_list.js loaded');
     loadServers();
     loadScripts();
     setupEventListeners();
@@ -78,6 +78,7 @@ function populateScriptSelect() {
 }
 
 function setupEventListeners() {
+    console.log('Setting up event listeners');
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.action-menu-button') && !e.target.closest('.dropdown-menu')) {
             closeDropdown();
@@ -91,9 +92,19 @@ function setupEventListeners() {
         if (e.key === 'Delete' && selectedServers.size > 0) bulkDelete();
         if (e.ctrlKey && e.key === 'a') { e.preventDefault(); selectAllServers(); }
     });
+    const rebootButton = document.getElementById('rebootSelectedButton');
+    if (rebootButton) {
+        rebootButton.addEventListener('click', () => {
+            console.log('Reboot selected button clicked');
+            bulkReboot();
+        });
+    } else {
+        console.error('Reboot selected button not found');
+    }
 }
 
 function setupSearch() {
+    console.log('Setting up search');
     const searchInput = document.getElementById('searchInput');
     let searchTimeout;
     searchInput.addEventListener('input', (e) => {
@@ -103,6 +114,7 @@ function setupSearch() {
 }
 
 function filterServers(query) {
+    console.log('Filtering servers with query:', query);
     if (!query.trim()) {
         filteredServers = [...allServers];
     } else {
@@ -119,6 +131,7 @@ function filterServers(query) {
 }
 
 function renderServers() {
+    console.log('Rendering servers:', filteredServers.length);
     const tbody = document.getElementById('serversTableBody');
     if (!filteredServers.length) {
         tbody.innerHTML = `
@@ -171,31 +184,42 @@ function getStatusText(status) {
 }
 
 function toggleServerSelection(ip) {
+    console.log('Toggling selection for IP:', ip, 'Current selected:', Array.from(selectedServers));
     if (selectedServers.has(ip)) selectedServers.delete(ip);
     else selectedServers.add(ip);
+    console.log('After toggle, selected:', Array.from(selectedServers));
     updateSelectionUI();
     updateRunButton();
+    updateRebootButton();
 }
 
 function toggleSelectAll() {
+    console.log('Toggling select all');
     const selectAllCheckbox = document.getElementById('selectAll');
     if (selectAllCheckbox.checked) selectAllServers();
     else clearSelection();
 }
 
 function selectAllServers() {
+    console.log('Selecting all servers');
     filteredServers.forEach(server => selectedServers.add(server.ip));
+    console.log('All selected:', Array.from(selectedServers));
     updateSelectionUI();
     updateRunButton();
+    updateRebootButton();
 }
 
 function clearSelection() {
+    console.log('Clearing selection');
     selectedServers.clear();
+    console.log('Selection cleared:', Array.from(selectedServers));
     updateSelectionUI();
     updateRunButton();
+    updateRebootButton();
 }
 
 function updateSelectionUI() {
+    console.log('Updating selection UI, selected count:', selectedServers.size);
     const selectAllCheckbox = document.getElementById('selectAll');
     const selectedCount = selectedServers.size;
     const visibleCount = filteredServers.length;
@@ -223,6 +247,7 @@ function updateSelectionUI() {
 }
 
 function updateSelectedActions() {
+    console.log('Updating selected actions');
     const selectedActions = document.getElementById('selectedActions');
     const selectedCount = document.getElementById('selectedCount');
     selectedCount.textContent = `${selectedServers.size} выбрано`;
@@ -231,6 +256,7 @@ function updateSelectedActions() {
 }
 
 function updateRunButton() {
+    console.log('Updating run button');
     const runScriptButton = document.getElementById('runScriptButton');
     const runButtonText = document.getElementById('runButtonText');
     const scriptSelect = document.getElementById('scriptSelect');
@@ -242,19 +268,32 @@ function updateRunButton() {
     }
 }
 
+function updateRebootButton() {
+    console.log('Updating reboot button, selected count:', selectedServers.size);
+    const rebootButton = document.getElementById('rebootSelectedButton');
+    if (rebootButton) {
+        rebootButton.disabled = selectedServers.size === 0;
+        console.log('Reboot button disabled:', rebootButton.disabled);
+    } else {
+        console.error('Reboot button not found');
+    }
+}
+
 function updateStats() {
+    console.log('Updating stats');
     const totalServers = document.getElementById('totalServers');
     const onlineServers = document.getElementById('onlineServers');
     const selectedServersCount = document.getElementById('selectedServers');
     const onlineCount = allServers.filter(s => s.status === 'online').length;
-    totalServers.textContent = allServers.length;
-    onlineServers.textContent = onlineCount;
+    totalServers.innerHTML = totalServers.classList.contains('loading') ? allServers.length : totalServers.innerHTML.replace(/<span class="loading">.*<\/span>/, allServers.length);
+    onlineServers.innerHTML = onlineServers.classList.contains('loading') ? onlineCount : onlineServers.innerHTML.replace(/<span class="loading">.*<\/span>/, onlineCount);
     selectedServersCount.textContent = selectedServers.size;
 }
 
 function sortTable(field) {
+    console.log('Sorting table by:', field);
     const direction = currentSort.field === field && currentSort.direction === 'asc' ? 'desc' : 'asc';
-    document.querySelectorAll('th').forEach(th => th.classList.remove('active', 'asc', 'desc'));
+    document.querySelectorAll('th.sortable').forEach(th => th.classList.remove('active', 'asc', 'desc'));
     const clickedTh = event.target.closest('th');
     clickedTh.classList.add('active', direction);
     filteredServers.sort((a, b) => {
@@ -275,6 +314,7 @@ function sortTable(field) {
 }
 
 function toggleDropdown(button, ip) {
+    console.log('Toggling dropdown for IP:', ip);
     const dropdown = document.getElementById('dropdownMenu');
     const wasActive = dropdown.classList.contains('active');
     closeDropdown();
@@ -283,21 +323,30 @@ function toggleDropdown(button, ip) {
         let top = rect.bottom + window.scrollY + 8;
         let left = rect.right + window.scrollX - 200;
         if (left < 0) left = rect.left + window.scrollX;
-        if (top + 120 > window.innerHeight + window.scrollY) {
-            top = rect.top + window.scrollY - 120 - 8;
+        if (top + 200 > window.innerHeight + window.scrollY) {
+            top = rect.top + window.scrollY - 200 - 8;
         }
         dropdown.style.top = `${top}px`;
         dropdown.style.left = `${left}px`;
         dropdown.classList.add('active');
+        console.log('Dropdown opened for IP:', ip);
         document.getElementById('runScriptAction').onclick = () => {
+            console.log('Run script action clicked for IP:', ip);
             showRunScriptModal([ip]);
             closeDropdown();
         };
         document.getElementById('editAction').onclick = () => {
-            editServer(ip);
+            console.log('Edit action clicked for IP:', ip);
+            showEditServerModal(ip);
+            closeDropdown();
+        };
+        document.getElementById('rebootAction').onclick = () => {
+            console.log('Reboot action clicked for IP:', ip);
+            rebootServer(ip);
             closeDropdown();
         };
         document.getElementById('deleteAction').onclick = () => {
+            console.log('Delete action clicked for IP:', ip);
             showDeleteModal([ip]);
             closeDropdown();
         };
@@ -305,6 +354,7 @@ function toggleDropdown(button, ip) {
 }
 
 function closeDropdown() {
+    console.log('Closing dropdown');
     document.getElementById('dropdownMenu').classList.remove('active');
 }
 
@@ -320,11 +370,8 @@ function formatDate(dateString) {
     }
 }
 
-function editServer(ip) {
-    showToast(`Редактирование сервера ${ip} (функция в разработке)`, 'info');
-}
-
 async function runScript(ip, scriptName) {
+    console.log('Running script:', scriptName, 'on IP:', ip);
     try {
         showToast(`Запуск скрипта ${scriptName} на сервере ${ip}...`, 'info');
         const response = await fetch('/api/run_scripts', {
@@ -332,11 +379,14 @@ async function runScript(ip, scriptName) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ips: [ip], script_name: scriptName })
         });
+        console.log('Run script response status:', response.status);
         if (!response.ok) {
             const errorData = await response.json();
+            console.error('Run script error data:', errorData);
             throw new Error(errorData.detail || 'Ошибка запуска скрипта');
         }
         const result = await response.json();
+        console.log('Run script result:', result);
         const success = result.results[0].success;
         const message = result.results[0].message;
         if (success) {
@@ -350,7 +400,38 @@ async function runScript(ip, scriptName) {
     }
 }
 
+async function rebootServer(ip) {
+    console.log('Rebooting server:', ip);
+    try {
+        showToast(`Перезагрузка сервера ${ip}...`, 'info');
+        const response = await fetch('/api/reboot_servers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ips: [ip] })
+        });
+        console.log('Reboot response status:', response.status);
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Reboot error data:', errorData);
+            throw new Error(errorData.detail || 'Ошибка перезагрузки сервера');
+        }
+        const result = await response.json();
+        console.log('Reboot result:', result);
+        const success = result.results[0].success;
+        const message = result.results[0].message;
+        if (success) {
+            showToast(`Сервер ${ip} успешно перезагружен`, 'success');
+        } else {
+            throw new Error(message);
+        }
+    } catch (error) {
+        console.error('Error rebooting server:', error);
+        showToast(`Ошибка перезагрузки сервера ${ip}: ${error.message}`, 'error');
+    }
+}
+
 async function bulkRunScript() {
+    console.log('Running bulk script');
     if (selectedServers.size === 0) return;
     const serverList = Array.from(selectedServers);
     const scriptSelect = document.getElementById('scriptSelect');
@@ -369,39 +450,104 @@ async function bulkRunScript() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ips: serverList, script_name: scriptName })
         });
+        console.log('Bulk run script response status:', response.status);
         if (!response.ok) {
             const errorData = await response.json();
+            console.error('Bulk run script error data:', errorData);
             throw new Error(errorData.detail || 'Ошибка массового запуска скрипта');
         }
         const data = await response.json();
+        console.log('Bulk run script result:', data);
         const results = data.results || [];
         let successCount = 0;
         let errorCount = 0;
+        let errorMessages = [];
         results.forEach(result => {
-            if (result.success) successCount++;
-            else {
-                console.error(`Error running script on ${result.ip}: ${result.message}`);
+            if (result.success) {
+                successCount++;
+            } else {
                 errorCount++;
+                errorMessages.push(`Сервер ${result.ip}: ${result.message}`);
+                console.error(`Error running script on ${result.ip}: ${result.message}`);
             }
         });
         if (successCount > 0 && errorCount === 0) {
             showToast(`${successCount} серверов успешно обработаны`, 'success');
         } else if (successCount > 0 && errorCount > 0) {
-            showToast(`Выполнено: ${successCount}, ошибок: ${errorCount}`, 'error');
+            showToast(`Выполнено: ${successCount}, ошибок: ${errorCount}. ${errorMessages.join('; ')}`, 'error');
         } else {
-            showToast(`Ошибка выполнения скрипта: ${errorCount} ошибок`, 'error');
+            showToast(`Ошибка выполнения скрипта: ${errorCount} ошибок. ${errorMessages.join('; ')}`, 'error');
         }
         clearSelection();
     } catch (error) {
         console.error('Error in bulk script execution:', error);
-        showToast('Ошибка при массовом запуске скрипта', 'error');
+        showToast('Ошибка при массовом запуске скрипта: ' + error.message, 'error');
     } finally {
         runScriptButton.classList.remove('loading');
         runScriptButton.disabled = false;
     }
 }
 
-function showRunScriptModal(ips) {
+async function bulkReboot() {
+    console.log('Running bulk reboot, selected servers:', Array.from(selectedServers));
+    if (selectedServers.size === 0) {
+        console.warn('No servers selected for bulk reboot');
+        showToast('Выберите хотя бы один сервер', 'error');
+        return;
+    }
+    const serverList = Array.from(selectedServers);
+    console.log('Server list for reboot:', serverList);
+    const rebootButton = document.getElementById('rebootSelectedButton');
+    rebootButton.classList.add('loading');
+    rebootButton.disabled = true;
+    try {
+        showToast(`Перезагрузка ${serverList.length} серверов...`, 'info');
+        const response = await fetch('/api/reboot_servers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ips: serverList })
+        });
+        console.log('Bulk reboot response status:', response.status);
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Bulk reboot error data:', errorData);
+            throw new Error(errorData.detail || 'Ошибка массовой перезагрузки');
+        }
+        const data = await response.json();
+        console.log('Bulk reboot result:', data);
+        const results = data.results || [];
+        let successCount = 0;
+        let errorCount = 0;
+        let errorMessages = [];
+        results.forEach(result => {
+            if (result.success) {
+                successCount++;
+            } else {
+                errorCount++;
+                errorMessages.push(`Сервер ${result.ip}: ${result.message}`);
+                console.error(`Error rebooting server ${result.ip}: ${result.message}`);
+            }
+        });
+        if (successCount > 0 && errorCount === 0) {
+            showToast(`${successCount} серверов успешно перезагружены`, 'success');
+        } else if (successCount > 0 && errorCount > 0) {
+            showToast(`Перезагружено: ${successCount}, ошибок: ${errorCount}. ${errorMessages.join('; ')}`, 'error');
+        } else {
+            showToast(`Ошибка перезагрузки: ${errorCount} ошибок. ${errorMessages.join('; ')}`, 'error');
+        }
+        clearSelection();
+    } catch (error) {
+        console.error('Error in bulk reboot:', error);
+        showToast('Ошибка при массовой перезагрузке: ' + error.message, 'error');
+    } finally {
+        rebootButton.classList.remove('loading');
+        rebootButton.disabled = false;
+        updateRebootButton();
+    }
+}
+
+async function showRunScriptModal(ips) {
+    console.log('Showing run script modal for IPs:', ips);
     const modal = document.getElementById('modalOverlay');
     const title = document.getElementById('modalTitle');
     const description = document.getElementById('modalDescription');
@@ -417,7 +563,9 @@ function showRunScriptModal(ips) {
     currentModalAction = 'run_script';
     currentModalData = ips;
     const existingSelect = document.getElementById('modalScriptSelect');
+    const existingInputs = document.getElementById('modalInputs');
     if (existingSelect) existingSelect.remove();
+    if (existingInputs) existingInputs.remove();
     const scriptSelect = document.createElement('select');
     scriptSelect.id = 'modalScriptSelect';
     scriptSelect.className = 'form-select';
@@ -427,7 +575,64 @@ function showRunScriptModal(ips) {
     modal.classList.add('active');
 }
 
+async function showEditServerModal(ip) {
+    console.log('Showing edit server modal for IP:', ip);
+    const modal = document.getElementById('modalOverlay');
+    const title = document.getElementById('modalTitle');
+    const description = document.getElementById('modalDescription');
+    const confirmButton = document.getElementById('modalConfirmButton');
+    title.textContent = 'Редактировать сервер';
+    description.textContent = `Редактируйте данные сервера ${ip}:`;
+    confirmButton.textContent = 'Сохранить';
+    confirmButton.classList.remove('danger');
+    confirmButton.classList.add('primary');
+    currentModalAction = 'edit_server';
+    currentModalData = ip;
+
+    const server = allServers.find(s => s.ip === ip);
+    if (!server) {
+        console.error('Server not found:', ip);
+        showToast('Сервер не найден', 'error');
+        return;
+    }
+    const existingSelect = document.getElementById('modalScriptSelect');
+    const existingInputs = document.getElementById('modalInputs');
+    if (existingSelect) existingSelect.remove();
+    if (existingInputs) existingInputs.remove();
+    
+    let inboundTags = [];
+    try {
+        const response = await fetch('/api/inbound_tags');
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        inboundTags = data.tags || [];
+        console.log('Inbound tags loaded:', inboundTags);
+    } catch (error) {
+        console.error('Error fetching inbound tags:', error);
+        showToast('Ошибка загрузки тегов: ' + error.message, 'error');
+    }
+    
+    const inputsDiv = document.createElement('div');
+    inputsDiv.id = 'modalInputs';
+    inputsDiv.innerHTML = `
+        <div class="form-group">
+            <label for="editIpInput">IP адрес:</label>
+            <input type="text" id="editIpInput" class="form-input" value="${server.ip}" required>
+        </div>
+        <div class="form-group">
+            <label for="editInboundTagInput">Inbound Tag:</label>
+            <select id="editInboundTagInput" class="form-select" required>
+                <option value="">Выберите тег...</option>
+                ${inboundTags.map(tag => `<option value="${tag}" ${tag === server.inbound_tag ? 'selected' : ''}>${tag}</option>`).join('')}
+            </select>
+        </div>
+    `;
+    description.insertAdjacentElement('afterend', inputsDiv);
+    modal.classList.add('active');
+}
+
 function showDeleteModal(ips) {
+    console.log('Showing delete modal for IPs:', ips);
     const modal = document.getElementById('modalOverlay');
     const title = document.getElementById('modalTitle');
     const description = document.getElementById('modalDescription');
@@ -443,19 +648,25 @@ function showDeleteModal(ips) {
     currentModalAction = 'delete';
     currentModalData = ips;
     const existingSelect = document.getElementById('modalScriptSelect');
+    const existingInputs = document.getElementById('modalInputs');
     if (existingSelect) existingSelect.remove();
+    if (existingInputs) existingInputs.remove();
     modal.classList.add('active');
 }
 
 function closeModal() {
+    console.log('Closing modal');
     document.getElementById('modalOverlay').classList.remove('active');
     currentModalAction = null;
     currentModalData = null;
     const existingSelect = document.getElementById('modalScriptSelect');
+    const existingInputs = document.getElementById('modalInputs');
     if (existingSelect) existingSelect.remove();
+    if (existingInputs) existingInputs.remove();
 }
 
 async function confirmModalAction() {
+    console.log('Confirming modal action:', currentModalAction);
     if (currentModalAction === 'run_script' && currentModalData) {
         const scriptSelect = document.getElementById('modalScriptSelect');
         const scriptName = scriptSelect ? scriptSelect.value : null;
@@ -469,6 +680,14 @@ async function confirmModalAction() {
         } else {
             await bulkRunScriptWithScript(serverList, scriptName);
         }
+    } else if (currentModalAction === 'edit_server' && currentModalData) {
+        const ipInput = document.getElementById('editIpInput');
+        const inboundTagInput = document.getElementById('editInboundTagInput');
+        if (!ipInput.value || !inboundTagInput.value) {
+            showToast('Заполните все поля', 'error');
+            return;
+        }
+        await editServer(currentModalData, ipInput.value, inboundTagInput.value);
     } else if (currentModalAction === 'delete' && currentModalData) {
         await deleteServers(currentModalData);
     }
@@ -476,6 +695,7 @@ async function confirmModalAction() {
 }
 
 async function bulkRunScriptWithScript(serverList, scriptName) {
+    console.log('Running bulk script with:', scriptName, 'on servers:', serverList);
     const runScriptButton = document.getElementById('runScriptButton');
     runScriptButton.classList.add('loading');
     runScriptButton.disabled = true;
@@ -486,39 +706,82 @@ async function bulkRunScriptWithScript(serverList, scriptName) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ips: serverList, script_name: scriptName })
         });
+        console.log('Bulk run script response status:', response.status);
         if (!response.ok) {
             const errorData = await response.json();
+            console.error('Bulk run script error data:', errorData);
             throw new Error(errorData.detail || 'Ошибка массового запуска скрипта');
         }
         const data = await response.json();
+        console.log('Bulk run script result:', data);
         const results = data.results || [];
         let successCount = 0;
         let errorCount = 0;
+        let errorMessages = [];
         results.forEach(result => {
-            if (result.success) successCount++;
-            else {
-                console.error(`Error running script on ${result.ip}: ${result.message}`);
+            if (result.success) {
+                successCount++;
+            } else {
                 errorCount++;
+                errorMessages.push(`Сервер ${result.ip}: ${result.message}`);
+                console.error(`Error running script on ${result.ip}: ${result.message}`);
             }
         });
         if (successCount > 0 && errorCount === 0) {
             showToast(`${successCount} серверов успешно обработаны`, 'success');
         } else if (successCount > 0 && errorCount > 0) {
-            showToast(`Выполнено: ${successCount}, ошибок: ${errorCount}`, 'error');
+            showToast(`Выполнено: ${successCount}, ошибок: ${errorCount}. ${errorMessages.join('; ')}`, 'error');
         } else {
-            showToast(`Ошибка выполнения скрипта: ${errorCount} ошибок`, 'error');
+            showToast(`Ошибка выполнения скрипта: ${errorCount} ошибок. ${errorMessages.join('; ')}`, 'error');
         }
         clearSelection();
     } catch (error) {
         console.error('Error in bulk script execution:', error);
-        showToast('Ошибка при массовом запуске скрипта', 'error');
+        showToast('Ошибка при массовом запуске скрипта: ' + error.message, 'error');
     } finally {
         runScriptButton.classList.remove('loading');
         runScriptButton.disabled = false;
     }
 }
 
+async function editServer(oldIp, newIp, newInboundTag) {
+    console.log('Editing server:', oldIp, 'to new IP:', newIp, 'new inbound tag:', newInboundTag);
+    try {
+        showToast(`Сохранение изменений для сервера ${oldIp}...`, 'info');
+        const response = await fetch('/api/edit_server', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_ip: oldIp, new_ip: newIp, new_inbound_tag: newInboundTag })
+        });
+        console.log('Edit response status:', response.status);
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Edit error data:', errorData);
+            throw new Error(errorData.detail || 'Ошибка редактирования сервера');
+        }
+        const result = await response.json();
+        console.log('Edit result:', result);
+        if (result.success) {
+            showToast(`Сервер ${oldIp} успешно обновлён`, 'success');
+            const serverIndex = allServers.findIndex(s => s.ip === oldIp);
+            if (serverIndex !== -1) {
+                allServers[serverIndex].ip = newIp;
+                allServers[serverIndex].inbound_tag = newInboundTag;
+            }
+            filteredServers = [...allServers];
+            renderServers();
+            updateStats();
+        } else {
+            throw new Error(result.message);
+        }
+    } catch (error) {
+        console.error('Error editing server:', error);
+        showToast(`Ошибка редактирования сервера ${oldIp}: ${error.message}`, 'error');
+    }
+}
+
 async function deleteServers(ips) {
+    console.log('Deleting servers:', ips);
     try {
         showToast(`Удаление ${ips.length} серверов...`, 'info');
         const results = await Promise.allSettled(
@@ -550,25 +813,14 @@ async function deleteServers(ips) {
 }
 
 function bulkDelete() {
+    console.log('Running bulk delete');
     if (selectedServers.size === 0) return;
     showDeleteModal(Array.from(selectedServers));
 }
 
 function showAlert(message, type = 'info') {
-    const alert = document.getElementById('alert');
-    if (alert) {
-        alert.textContent = message;
-        alert.className = `alert ${type}`;
-        setTimeout(() => {
-            alert.className = 'alert';
-        }, 5000);
-    } else {
-        showToast(message, type);
-    }
-}
-
-function showToast(message, type = 'info') {
-    const container = document.getElementById('toastContainer');
+    console.log('Showing alert:', message, type);
+    const toastContainer = document.getElementById('toastContainer');
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     toast.innerHTML = `
@@ -582,17 +834,22 @@ function showToast(message, type = 'info') {
         </svg>
         <div class="toast-message">${message}</div>
     `;
-    container.appendChild(toast);
+    toastContainer.appendChild(toast);
     setTimeout(() => toast.classList.add('show'), 100);
     setTimeout(() => {
         toast.classList.remove('show');
         setTimeout(() => {
-            if (container.contains(toast)) container.removeChild(toast);
+            if (toastContainer.contains(toast)) toastContainer.removeChild(toast);
         }, 300);
     }, 4000);
 }
 
+function showToast(message, type = 'info') {
+    showAlert(message, type);
+}
+
 function toggleTheme() {
+    console.log('Toggling theme');
     const isDark = document.documentElement.hasAttribute('data-theme');
     if (isDark) {
         document.documentElement.removeAttribute('data-theme');
@@ -606,6 +863,7 @@ function toggleTheme() {
 }
 
 function loadTheme() {
+    console.log('Loading theme');
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'dark') {
         document.documentElement.setAttribute('data-theme', 'dark');

@@ -22,6 +22,7 @@ import shutil
 import asyncssh
 import subprocess
 from datetime import datetime, timedelta
+import retrying
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -46,6 +47,11 @@ class AddServerRequest(BaseModel):
     ips: List[str]
     inbound_tag: str
 
+class EditServerRequest(BaseModel):
+    old_ip: str
+    new_ip: str
+    new_inbound_tag: str
+
 def get_script_name(inbound_tag: str) -> str:
     safe_tag = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', inbound_tag).strip()
     script_name = safe_tag.lower().replace(" ", "_") + ".sh"
@@ -57,7 +63,13 @@ async def remove_existing_json(ip):
     try:
         if os.getenv('XRAY_CHECKER_SSH_KEY') and os.getenv('XRAY_CHECKER_HOST') not in ['localhost', '127.0.0.1']:
             logger.info(f"Checking for existing JSON at {remote_path} on remote host {os.getenv('XRAY_CHECKER_HOST')}")
-            async with asyncssh.connect(os.getenv('XRAY_CHECKER_HOST'), client_keys=[os.getenv('XRAY_CHECKER_SSH_KEY')], known_hosts=None) as conn:
+            async with asyncssh.connect(
+                os.getenv('XRAY_CHECKER_HOST'),
+                client_keys=[os.getenv('XRAY_CHECKER_SSH_KEY')],
+                known_hosts=None,
+                connect_timeout=15,
+                login_timeout=15
+            ) as conn:
                 async with conn.start_sftp_client() as sftp:
                     try:
                         await sftp.stat(remote_path)
@@ -77,37 +89,54 @@ async def remove_existing_json(ip):
         else:
             logger.error("Invalid Xray Checker configuration: SSH key or host not set")
             raise ValueError("SSH key or valid host required for Xray Checker")
+        return True
     except Exception as e:
         logger.error(f"Failed to remove existing JSON for {ip}: {str(e)}\n{traceback.format_exc()}")
-        raise
+        return False
 
 async def restart_xray_checker():
     try:
+        container_name = os.getenv('XRAY_CHECKER_CONTAINER_NAME', 'xraychecker-xray-checker')
+        logger.info(f"Attempting to restart Xray Checker container: {container_name}")
         if os.getenv('XRAY_CHECKER_SSH_KEY') and os.getenv('XRAY_CHECKER_HOST') not in ['localhost', '127.0.0.1']:
             logger.info(f"Restarting Xray Checker on remote host {os.getenv('XRAY_CHECKER_HOST')}")
-            async with asyncssh.connect(os.getenv('XRAY_CHECKER_HOST'), client_keys=[os.getenv('XRAY_CHECKER_SSH_KEY')], known_hosts=None) as conn:
-                result = await conn.run('sudo docker restart xraychecker-xray-checker')
+            async with asyncssh.connect(
+                os.getenv('XRAY_CHECKER_HOST'),
+                client_keys=[os.getenv('XRAY_CHECKER_SSH_KEY')],
+                known_hosts=None,
+                connect_timeout=15,
+                login_timeout=15
+            ) as conn:
+                # Check if container exists
+                result = await conn.run(f'docker ps -a -q -f name={container_name}')
+                if not result.stdout.strip():
+                    logger.warning(f"Container {container_name} not found on {os.getenv('XRAY_CHECKER_HOST')}, skipping restart")
+                    return True
+                result = await conn.run(f'sudo docker restart {container_name}')
                 if result.exit_status != 0:
                     logger.error(f"Docker restart failed: {result.stderr}")
-                    show_toast("Ошибка перезапуска Xray Checker", "error")
                     raise Exception(f"Docker restart failed: {result.stderr}")
                 else:
                     logger.info("Xray Checker restarted successfully")
         elif os.getenv('XRAY_CHECKER_HOST') in ['localhost', '127.0.0.1']:
             logger.info("Restarting Xray Checker locally")
-            result = subprocess.run(['sudo', 'docker', 'restart', 'xraychecker-xray-checker'], capture_output=True, text=True)
+            result = subprocess.run(['docker', 'ps', '-a', '-q', '-f', f'name={container_name}'], capture_output=True, text=True)
+            if not result.stdout.strip():
+                logger.warning(f"Container {container_name} not found locally, skipping restart")
+                return True
+            result = subprocess.run(['sudo', 'docker', 'restart', container_name], capture_output=True, text=True)
             if result.returncode != 0:
                 logger.error(f"Docker restart failed: {result.stderr}")
-                show_toast("Ошибка перезапуска Xray Checker", "error")
                 raise Exception(f"Docker restart failed: {result.stderr}")
             else:
                 logger.info("Xray Checker restarted successfully")
         else:
             logger.error("Invalid Xray Checker configuration: SSH key or host not set")
             raise ValueError("SSH key or valid host required for Xray Checker")
+        return True
     except Exception as e:
         logger.error(f"Failed to restart Xray Checker: {str(e)}\n{traceback.format_exc()}")
-        raise
+        return False
 
 async def copy_json_to_xray_checker(ip, json_data):
     local_path = f"/config/outbounds/{ip}.json"
@@ -126,60 +155,55 @@ async def copy_json_to_xray_checker(ip, json_data):
 
         if os.getenv('XRAY_CHECKER_SSH_KEY') and os.getenv('XRAY_CHECKER_HOST') not in ['localhost', '127.0.0.1']:
             logger.info(f"Copying JSON to remote {remote_path} via SFTP (host: {os.getenv('XRAY_CHECKER_HOST')})")
-            async with asyncssh.connect(os.getenv('XRAY_CHECKER_HOST'), client_keys=[os.getenv('XRAY_CHECKER_SSH_KEY')], known_hosts=None) as conn:
+            async with asyncssh.connect(
+                os.getenv('XRAY_CHECKER_HOST'),
+                client_keys=[os.getenv('XRAY_CHECKER_SSH_KEY')],
+                known_hosts=None,
+                connect_timeout=15,
+                login_timeout=15
+            ) as conn:
                 async with conn.start_sftp_client() as sftp:
                     try:
                         await sftp.stat(os.path.dirname(remote_path))
                         logger.debug(f"Remote path {os.path.dirname(remote_path)} exists")
                     except asyncssh.SFTPError:
                         logger.info(f"Remote path {os.path.dirname(remote_path)} does not exist, creating it")
-                        try:
-                            await sftp.makedirs(os.path.dirname(remote_path))
-                            logger.info(f"Created remote directory {os.path.dirname(remote_path)}")
-                        except Exception as e:
-                            logger.error(f"Failed to create remote directory {os.path.dirname(remote_path)}: {str(e)}\n{traceback.format_exc()}")
-                            raise ValueError(f"Failed to create remote directory {os.path.dirname(remote_path)}: {str(e)}")
+                        await sftp.makedirs(os.path.dirname(remote_path))
+                        logger.info(f"Created remote directory {os.path.dirname(remote_path)}")
                     await sftp.put(local_path, remote_path)
                     logger.info(f"JSON copied to {remote_path}")
-                try:
-                    result = await conn.run('sudo docker restart xraychecker-xray-checker')
-                    if result.exit_status != 0:
-                        logger.error(f"Docker restart failed: {result.stderr}")
-                        show_toast("Ошибка перезапуска Xray Checker", "error")
-                    else:
-                        logger.info("Xray Checker restarted successfully")
-                except asyncssh.ProcessError as e:
-                    logger.error(f"Failed to restart Xray Checker container: {str(e)}\n{traceback.format_exc()}")
-                    show_toast("Ошибка перезапуска Xray Checker", "error")
         elif os.getenv('XRAY_CHECKER_HOST') in ['localhost', '127.0.0.1']:
             logger.info(f"Copying JSON to local {remote_path}")
-            if not os.path.exists(os.path.dirname(remote_path)):
-                logger.info(f"Local path {os.path.dirname(remote_path)} does not exist, creating it")
-                os.makedirs(os.path.dirname(remote_path), exist_ok=True)
-                logger.info(f"Created local directory {os.path.dirname(remote_path)}")
+            os.makedirs(os.path.dirname(remote_path), exist_ok=True)
             shutil.copy2(local_path, remote_path)
             logger.info(f"JSON copied to {remote_path}")
-            try:
-                result = subprocess.run(['sudo', 'docker', 'restart', 'xraychecker-xray-checker'], capture_output=True, text=True)
-                if result.returncode != 0:
-                    logger.error(f"Docker restart failed: {result.stderr}")
-                    show_toast("Ошибка перезапуска Xray Checker", "error")
-                else:
-                    logger.info("Xray Checker restarted successfully")
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Failed to restart Xray Checker container: {str(e)}\n{traceback.format_exc()}")
-                show_toast("Ошибка перезапуска Xray Checker", "error")
         else:
             logger.error("Invalid Xray Checker configuration: SSH key or host not set")
             raise ValueError("SSH key or valid host required for Xray Checker")
+        return True
     except Exception as e:
         logger.error(f"Failed to copy JSON for {ip}: {str(e)}\n{traceback.format_exc()}")
-        show_toast(f"Ошибка копирования JSON для {ip}: {str(e)}", "error")
-        raise
+        return False
     finally:
         if os.path.exists(local_path):
             logger.info(f"Removing temporary JSON at {local_path}")
             os.remove(local_path)
+
+async def update_xray_checker_json(ip, inbound_tag, vless_key):
+    try:
+        json_data = create_outbound_json(ip, inbound_tag, vless_key)
+        if not json_data:
+            logger.error(f"create_outbound_json returned None for {ip}")
+            raise ValueError("Failed to create outbound JSON")
+        if not await copy_json_to_xray_checker(ip, json_data):
+            raise ValueError(f"Failed to copy JSON for {ip}")
+        if not await restart_xray_checker():
+            logger.warning(f"Failed to restart Xray Checker for {ip}, but JSON copied")
+        logger.info(f"JSON updated for {ip} with inbound_tag {inbound_tag}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update JSON for {ip}: {str(e)}\n{traceback.format_exc()}")
+        return False
 
 async def update_vless_keys_from_subscription():
     try:
@@ -198,7 +222,6 @@ async def check_server_statuses():
     global previous_statuses, pending_retries
     try:
         logger.debug("Checking server statuses in background")
-        # Fetch current statuses
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
             async with session.get(f"{XRAY_CHECKER_URL}/metrics") as response:
                 if response.status != 200:
@@ -219,7 +242,6 @@ async def check_server_statuses():
         logger.debug(f"Current statuses: {current_statuses}")
         logger.debug(f"Previous statuses: {previous_statuses}")
 
-        # Compare with previous statuses
         nodemonitoring_host = os.getenv('NODEMONITORING_HOST')
         nodemonitoring_port = os.getenv('NODEMONITORING_PORT')
         
@@ -230,7 +252,7 @@ async def check_server_statuses():
         webhook_url = f"http://{nodemonitoring_host}:{nodemonitoring_port}/api/kuma/alert"
         logger.info(f"Preparing to send webhook to: {webhook_url}")
 
-        semaphore = asyncio.Semaphore(10)  # Limit concurrent webhooks
+        semaphore = asyncio.Semaphore(10)
         async def send_webhook(ip, payload):
             async with semaphore:
                 try:
@@ -250,7 +272,6 @@ async def check_server_statuses():
         tasks = []
         for ip, status in current_statuses.items():
             prev_status = previous_statuses.get(ip)
-            # Send webhook for new servers or status changes
             if prev_status is None or status != prev_status:
                 logger.info(f"Status change detected for {ip}: {prev_status} -> {status}")
                 webhook_payload = {
@@ -261,7 +282,6 @@ async def check_server_statuses():
             else:
                 logger.debug(f"No status change for {ip}: {status}")
 
-        # Process pending retries
         current_time = datetime.utcnow()
         for ip, (payload, last_attempt) in list(pending_retries.items()):
             if current_time - last_attempt >= timedelta(minutes=5):
@@ -273,13 +293,11 @@ async def check_server_statuses():
             results = await asyncio.gather(*(send_webhook(ip, payload) for ip, payload in tasks), return_exceptions=True)
             for (ip, payload), result in zip(tasks, results):
                 if isinstance(result, Exception) or result is False:
-                    # Schedule retry after 5 minutes
                     pending_retries[ip] = (payload, current_time)
                     logger.error(f"Webhook for {ip} failed, scheduled retry in 5 minutes")
                 else:
                     logger.info(f"Webhook for {ip} succeeded")
 
-        # Update previous statuses
         previous_statuses.clear()
         previous_statuses.update(current_statuses)
         logger.debug(f"Updated previous statuses: {previous_statuses}")
@@ -370,6 +388,17 @@ async def get_vless_keys_api():
         logger.error(f"Failed to fetch vless keys: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to fetch vless keys")
 
+@app.get("/api/inbound_tags")
+async def get_inbound_tags():
+    try:
+        keys = await get_vless_keys()
+        tags = [key['inbound_tag'] for key in keys]
+        logger.info(f"Returning {len(tags)} inbound tags")
+        return {"tags": tags}
+    except Exception as e:
+        logger.error(f"Failed to fetch inbound tags: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Failed to fetch inbound tags")
+
 @app.get("/api/scripts")
 async def get_scripts():
     try:
@@ -431,7 +460,7 @@ async def add_server_api(request: AddServerRequest):
         logger.error(f"Script {script_path} not found for inbound_tag: {request.inbound_tag}")
         raise HTTPException(status_code=400, detail=f"Script {script_name} not found")
     results = []
-    semaphore = asyncio.Semaphore(20)
+    semaphore = asyncio.Semaphore(10)
     async def deploy_and_add(ip):
         async with semaphore:
             logger.info(f"Attempting to deploy script {script_name} on {ip}")
@@ -442,21 +471,8 @@ async def add_server_api(request: AddServerRequest):
                     logger.error(f"Location {request.inbound_tag} not found for {ip}")
                     return {"ip": ip, "success": False, "message": f"Location {request.inbound_tag} not found"}
                 if not await check_ip_in_xray_checker(ip):
-                    try:
-                        logger.debug(f"Calling create_outbound_json for {ip} with vless_key: {key['vless_key'][:50]}...")
-                        json_data = create_outbound_json(ip, request.inbound_tag, key['vless_key'])
-                        if json_data is None:
-                            logger.error(f"create_outbound_json returned None for {ip}")
-                            return {"ip": ip, "success": False, "message": "Failed to create outbound JSON"}
-                        logger.debug(f"JSON data for {ip}: {json.dumps(json_data, indent=2)}")
-                        await remove_existing_json(ip)  # Remove existing JSON if present
-                        await copy_json_to_xray_checker(ip, json_data)
-                    except ValueError as e:
-                        logger.warning(f"Invalid key for {request.inbound_tag}: {str(e)}\n{traceback.format_exc()}")
-                        return {"ip": ip, "success": False, "message": f"Invalid key for {request.inbound_tag}: {str(e)}"}
-                    except Exception as e:
-                        logger.error(f"Unexpected error in create_outbound_json for {ip}: {str(e)}\n{traceback.format_exc()}")
-                        return {"ip": ip, "success": False, "message": f"Unexpected error: {str(e)}"}
+                    if not await update_xray_checker_json(ip, request.inbound_tag, key['vless_key']):
+                        return {"ip": ip, "success": False, "message": "Failed to update Xray Checker JSON"}
                 success, message = await deploy_script(ip, script_name)
                 logger.debug(f"deploy_script result for {ip}: success={success}, message={message}")
                 if not isinstance(success, bool):
@@ -508,22 +524,8 @@ async def add_server_manual_api(request: AddServerRequest):
                 results.append({"ip": ip, "success": False, "message": f"Location {request.inbound_tag} not found"})
                 continue
             if not await check_ip_in_xray_checker(ip):
-                try:
-                    logger.debug(f"Calling create_outbound_json for {ip} with vless_key: {key['vless_key'][:50]}...")
-                    json_data = create_outbound_json(ip, request.inbound_tag, key['vless_key'])
-                    if json_data is None:
-                        logger.error(f"create_outbound_json returned None for {ip}")
-                        results.append({"ip": ip, "success": False, "message": "Failed to create outbound JSON"})
-                        continue
-                    logger.debug(f"JSON data for {ip}: {json.dumps(json_data, indent=2)}")
-                    await remove_existing_json(ip)  # Remove existing JSON if present
-                    await copy_json_to_xray_checker(ip, json_data)
-                except ValueError as e:
-                    logger.warning(f"Invalid key for {request.inbound_tag}: {str(e)}\n{traceback.format_exc()}")
-                    results.append({"ip": ip, "success": False, "message": f"Invalid key for {request.inbound_tag}: {str(e)}"})
-                except Exception as e:
-                    logger.error(f"Unexpected error in create_outbound_json for {ip}: {str(e)}\n{traceback.format_exc()}")
-                    results.append({"ip": ip, "success": False, "message": f"Unexpected error: {str(e)}"})
+                if not await update_xray_checker_json(ip, request.inbound_tag, key['vless_key']):
+                    results.append({"ip": ip, "success": False, "message": "Failed to update Xray Checker JSON"})
                     continue
             add_success = await add_server(ip, request.inbound_tag)
             logger.debug(f"add_server result for {ip}: {add_success}")
@@ -575,9 +577,12 @@ async def delete_server_api(ip: str = Query(...)):
         logger.error(f"Failed to delete server {ip}: not found in database")
         raise HTTPException(status_code=404, detail="Server not found")
     try:
-        await remove_existing_json(ip)  # Remove JSON from Xray Checker
-        await restart_xray_checker()  # Restart Xray Checker
-        logger.info(f"Server {ip} deleted successfully from database, JSON removed, and Xray Checker restarted")
+        if not await remove_existing_json(ip):
+            logger.error(f"Failed to remove JSON for {ip}")
+            raise ValueError("Failed to remove JSON")
+        if not await restart_xray_checker():
+            logger.warning(f"Failed to restart Xray Checker for {ip}, but JSON removed")
+        logger.info(f"Server {ip} deleted successfully from database, JSON removed")
     except Exception as e:
         logger.error(f"Failed to remove JSON or restart Xray Checker for {ip}: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to remove JSON or restart Xray Checker for {ip}: {str(e)}")
@@ -614,12 +619,19 @@ async def reboot_servers_api(request: RebootRequest):
             raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}")
     script_name = "reboot.sh"
     results = []
-    semaphore = asyncio.Semaphore(20)
+    semaphore = asyncio.Semaphore(5)  # Уменьшено для стабильности
     async def run_deploy_script(ip):
         async with semaphore:
             logger.info(f"Attempting to reboot server {ip} with script {script_name}")
             try:
-                success, message = await deploy_script(ip, script_name)
+                @retrying.retry(
+                    stop_max_attempt_number=3,
+                    wait_fixed=2000,
+                    retry_on_exception=lambda e: isinstance(e, (asyncssh.misc.ConnectionLost, asyncssh.misc.DisconnectError))
+                )
+                async def execute_deploy():
+                    return await deploy_script(ip, script_name)
+                success, message = await execute_deploy()
                 return {"ip": ip, "success": success, "message": message}
             except Exception as e:
                 logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
@@ -644,12 +656,19 @@ async def run_scripts_api(request: RunScriptsRequest):
         logger.error(f"Script {request.script_name} not found in {Config.SCRIPTS_PATH}")
         raise HTTPException(status_code=400, detail=f"Script {request.script_name} not found")
     results = []
-    semaphore = asyncio.Semaphore(20)
+    semaphore = asyncio.Semaphore(5)  # Уменьшено для стабильности
     async def run_deploy_script(ip):
         async with semaphore:
             logger.info(f"Attempting to run script {request.script_name} on {ip}")
             try:
-                success, message = await deploy_script(ip, request.script_name)
+                @retrying.retry(
+                    stop_max_attempt_number=3,
+                    wait_fixed=2000,
+                    retry_on_exception=lambda e: isinstance(e, (asyncssh.misc.ConnectionLost, asyncssh.misc.DisconnectError))
+                )
+                async def execute_deploy():
+                    return await deploy_script(ip, request.script_name)
+                success, message = await execute_deploy()
                 return {"ip": ip, "success": success, "message": message}
             except Exception as e:
                 logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
@@ -659,6 +678,44 @@ async def run_scripts_api(request: RunScriptsRequest):
     response = {"results": results}
     logger.info(f"Script execution completed: {response}")
     return response
+
+@app.post("/api/edit_server")
+async def edit_server_api(request: EditServerRequest):
+    logger.info(f"Edit server request: {request}")
+    try:
+        ipaddress.ip_address(request.old_ip)
+        ipaddress.ip_address(request.new_ip)
+    except ValueError:
+        logger.error(f"Invalid IP: old_ip={request.old_ip}, new_ip={request.new_ip}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail="Invalid IP address")
+    try:
+        servers = await get_servers()
+        server = next((s for s in servers if s[0] == request.old_ip), None)
+        if not server:
+            logger.error(f"Server {request.old_ip} not found")
+            raise HTTPException(status_code=404, detail="Server not found")
+        key = await get_vless_key(request.new_inbound_tag)
+        if not key:
+            logger.error(f"Inbound tag {request.new_inbound_tag} not found")
+            raise HTTPException(status_code=400, detail=f"Inbound tag {request.new_inbound_tag} not found")
+        if request.old_ip != request.new_ip or server[1] != request.new_inbound_tag:
+            if not await remove_existing_json(request.old_ip):
+                logger.error(f"Failed to remove JSON for {request.old_ip}")
+                raise HTTPException(status_code=500, detail="Failed to remove old JSON")
+        if not await update_xray_checker_json(request.new_ip, request.new_inbound_tag, key['vless_key']):
+            logger.error(f"Failed to update JSON for {request.new_ip}")
+            raise HTTPException(status_code=500, detail="Failed to update Xray Checker JSON")
+        if not await delete_server(request.old_ip):
+            logger.error(f"Failed to delete {request.old_ip} from database")
+            raise HTTPException(status_code=500, detail="Failed to update database")
+        if not await add_server(request.new_ip, request.new_inbound_tag):
+            logger.error(f"Failed to add {request.new_ip} to database")
+            raise HTTPException(status_code=500, detail="Failed to update database")
+        logger.info(f"Server updated: {request.old_ip} -> {request.new_ip}, inbound_tag: {request.new_inbound_tag}")
+        return {"success": True, "message": "Server updated"}
+    except Exception as e:
+        logger.error(f"Error editing {request.old_ip}: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/check_availability")
 async def check_availability_api(ip: str):
