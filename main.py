@@ -25,6 +25,9 @@ import subprocess
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Store previous server statuses
+previous_statuses = {}
+
 class ServerForm(BaseModel):
     ip: str
     inbound_tag: str
@@ -131,6 +134,69 @@ async def update_vless_keys_from_subscription():
     except Exception as e:
         logger.error(f"Failed to update VLESS keys: {str(e)}\n{traceback.format_exc()}")
 
+async def check_server_statuses():
+    global previous_statuses
+    try:
+        logger.debug("Checking server statuses in background")
+        # Fetch current statuses
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.get(f"{XRAY_CHECKER_URL}/metrics") as response:
+                if response.status != 200:
+                    logger.error(f"Xray Checker returned status: {response.status}, reason: {response.reason}")
+                    return
+                metrics = await response.text()
+        
+        current_statuses = {}
+        pattern = r'xray_proxy_status\{[^}]*address="([^:]+):\d+"[^}]*protocol="[^"]+"[^}]*\} (\d)'
+        for line in metrics.splitlines():
+            match = re.match(pattern, line)
+            if match:
+                ip, status = match.groups()
+                current_statuses[ip] = "online" if status == "1" else "offline"
+            else:
+                logger.debug(f"No match for metric line: {line}")
+
+        logger.debug(f"Current statuses: {current_statuses}")
+        logger.debug(f"Previous statuses: {previous_statuses}")
+
+        # Compare with previous statuses
+        nodemonitoring_host = os.getenv('NODEMONITORING_HOST')
+        nodemonitoring_port = os.getenv('NODEMONITORING_PORT')
+        
+        if not nodemonitoring_host or not nodemonitoring_port:
+            logger.error(f"NODEMONITORING_HOST or NODEMONITORING_PORT not set in .env: host={nodemonitoring_host}, port={nodemonitoring_port}")
+            return
+
+        webhook_url = f"http://{nodemonitoring_host}:{nodemonitoring_port}/api/kuma/alert"
+        logger.info(f"Preparing to send webhook to: {webhook_url}")
+
+        for ip, status in current_statuses.items():
+            prev_status = previous_statuses.get(ip)
+            if prev_status is None or status != prev_status:  # Handle first-time or changed statuses
+                logger.info(f"Status change detected for {ip}: {prev_status} -> {status}")
+                webhook_payload = {
+                    "heartbeat": {"msg": "ok" if status == "online" else "fail"},
+                    "monitor": {"description": ip}
+                }
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(webhook_url, json=webhook_payload) as resp:
+                            response_text = await resp.text()
+                            logger.debug(f"Webhook response for {ip}: status={resp.status}, response={response_text}")
+                            if resp.status != 200:
+                                logger.error(f"Failed to send webhook for {ip}: status={resp.status}, response={response_text}")
+                            else:
+                                logger.info(f"Webhook sent for {ip}: {webhook_payload}, response={response_text}")
+                except Exception as e:
+                    logger.error(f"Error sending webhook for {ip}: {str(e)}\n{traceback.format_exc()}")
+
+        # Update previous statuses
+        previous_statuses.clear()  # Clear to avoid stale data
+        previous_statuses.update(current_statuses)
+        logger.debug(f"Updated previous statuses: {previous_statuses}")
+    except Exception as e:
+        logger.error(f"Error in background status check: {str(e)}\n{traceback.format_exc()}")
+
 scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
@@ -139,6 +205,7 @@ async def lifespan(app: FastAPI):
         await init_db()
         logger.info("Database initialized successfully")
         scheduler.add_job(update_vless_keys_from_subscription, 'interval', hours=int(os.getenv('SUBSCRIPTION_REFRESH_HOURS', 1)))
+        scheduler.add_job(check_server_statuses, 'interval', minutes=1)
         scheduler.start()
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}\n{traceback.format_exc()}")
@@ -435,7 +502,7 @@ async def reboot_server_api(ip: str = Form(...)):
             logger.error(f"Failed to reboot server {ip}: {message}")
             raise HTTPException(status_code=500, detail=f"Failed to reboot server: {message}")
     except Exception as e:
-        logger.error(f"Exception in deploy_script for {ip}: {e}\n{traceback.format_exc()}")
+        logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to reboot server: {str(e)}")
     logger.info(f"Server {ip} rebooted successfully")
     return {"message": "Server rebooted successfully"}
@@ -459,7 +526,7 @@ async def reboot_servers_api(request: RebootRequest):
                 success, message = await deploy_script(ip, script_name)
                 return {"ip": ip, "success": success, "message": message}
             except Exception as e:
-                logger.error(f"Exception in deploy_script for {ip}: {e}\n{traceback.format_exc()}")
+                logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
                 return {"ip": ip, "success": False, "message": str(e)}
     tasks = [run_deploy_script(ip) for ip in request.ips]
     results = await asyncio.gather(*tasks)
@@ -489,7 +556,7 @@ async def run_scripts_api(request: RunScriptsRequest):
                 success, message = await deploy_script(ip, script_name)
                 return {"ip": ip, "success": success, "message": message}
             except Exception as e:
-                logger.error(f"Exception in deploy_script for {ip}: {e}\n{traceback.format_exc()}")
+                logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
                 return {"ip": ip, "success": False, "message": str(e)}
     tasks = [run_deploy_script(ip) for ip in request.ips]
     results = await asyncio.gather(*tasks)
