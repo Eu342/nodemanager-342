@@ -10,7 +10,7 @@ from fastapi import FastAPI, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from db import init_db, get_vless_keys, get_vless_key, update_vless_key, add_server, get_servers, delete_server
+from db import init_db, get_vless_keys, get_vless_key, update_vless_key, add_server, get_servers, delete_server, log_server_event, get_server_events
 from ssh_utils import deploy_script, check_server_availability
 from config import Config
 import aiohttp
@@ -23,6 +23,8 @@ import asyncssh
 import subprocess
 from datetime import datetime, timedelta
 import retrying
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -31,6 +33,15 @@ logger = logging.getLogger(__name__)
 previous_statuses = {}
 # Store pending webhook retries with timestamp
 pending_retries = {}
+# Track offline start times
+offline_starts = {}
+
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
 
 class ServerForm(BaseModel):
     ip: str
@@ -107,7 +118,6 @@ async def restart_xray_checker():
                 connect_timeout=15,
                 login_timeout=15
             ) as conn:
-                # Check if container exists
                 result = await conn.run(f'docker ps -a -q -f name={container_name}')
                 if not result.stdout.strip():
                     logger.warning(f"Container {container_name} not found on {os.getenv('XRAY_CHECKER_HOST')}, skipping restart")
@@ -219,25 +229,53 @@ async def update_vless_keys_from_subscription():
         logger.error(f"Failed to update VLESS keys: {str(e)}\n{traceback.format_exc()}")
 
 async def check_server_statuses():
-    global previous_statuses, pending_retries
+    global previous_statuses, pending_retries, offline_starts
     try:
         logger.debug("Checking server statuses in background")
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-            async with session.get(f"{XRAY_CHECKER_URL}/metrics") as response:
-                if response.status != 200:
-                    logger.error(f"Xray Checker returned status: {response.status}, reason: {response.reason}")
-                    return
-                metrics = await response.text()
-        
         current_statuses = {}
-        pattern = r'xray_proxy_status\{[^}]*address="([^:]+):\d+"[^}]*protocol="[^"]+"[^}]*\} (\d)'
-        for line in metrics.splitlines():
-            match = re.match(pattern, line)
-            if match:
-                ip, status = match.groups()
-                current_statuses[ip] = "online" if status == "1" else "offline"
-            else:
-                logger.debug(f"No match for metric line: {line}")
+        
+        # Fetch known servers from database
+        servers = await get_servers()
+        valid_ips = {server[0] for server in servers}
+        logger.debug(f"Valid server IPs from database: {valid_ips}")
+
+        # Try fetching metrics from Xray Checker
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            try:
+                async with session.get(f"{XRAY_CHECKER_URL}/metrics") as response:
+                    logger.info(f"Xray Checker /metrics status: {response.status}")
+                    if response.status != 200:
+                        logger.error(f"Xray Checker returned status: {response.status}, reason: {response.reason}")
+                    else:
+                        metrics = await response.text()
+                        logger.debug(f"Metrics response: {metrics[:500]}")
+                        pattern = r'xray_proxy_status\{[^}]*address="([^:]+):\d+"[^}]*protocol="[^"]+"[^}]*\} (\d)'
+                        for line in metrics.splitlines():
+                            match = re.match(pattern, line)
+                            if match:
+                                ip, status = match.groups()
+                                if ip in valid_ips and ip != 'n.unfence.nl':  # Explicitly ignore n.unfence.nl
+                                    current_statuses[ip] = "online" if status == "1" else "offline"
+                                    logger.debug(f"Parsed IP: {ip}, Status: {status}")
+                                else:
+                                    logger.warning(f"Ignoring IP from metrics: {ip}")
+                            else:
+                                logger.debug(f"No match for metric line: {line}")
+            except Exception as e:
+                logger.error(f"Failed to fetch Xray Checker metrics: {str(e)}\n{traceback.format_exc()}")
+
+        # If no statuses from metrics, check servers from database
+        if not current_statuses:
+            logger.warning("No statuses parsed from metrics, falling back to database servers")
+            for server in servers:
+                ip = server[0]
+                if ip != 'n.unfence.nl':  # Ignore n.unfence.nl
+                    current_statuses[ip] = "offline"  # Default to offline if metrics unavailable
+                    logger.debug(f"Added IP from database: {ip}, Status: offline")
+
+        if not current_statuses:
+            logger.error("No server statuses available from metrics or database")
+            return
 
         logger.debug(f"Current statuses: {current_statuses}")
         logger.debug(f"Previous statuses: {previous_statuses}")
@@ -269,6 +307,7 @@ async def check_server_statuses():
                     logger.error(f"Error sending webhook for {ip}: {str(e)}\n{traceback.format_exc()}")
                     return False
 
+        current_time = datetime.utcnow()
         tasks = []
         for ip, status in current_statuses.items():
             prev_status = previous_statuses.get(ip)
@@ -279,10 +318,23 @@ async def check_server_statuses():
                     "monitor": {"description": ip}
                 }
                 tasks.append((ip, webhook_payload))
-            else:
-                logger.debug(f"No status change for {ip}: {status}")
 
-        current_time = datetime.utcnow()
+                # Log event with duration_seconds
+                try:
+                    if status == "offline":
+                        await log_server_event(ip, "offline_start", duration_seconds=0)
+                        offline_starts[ip] = current_time
+                    elif status == "online" and ip in offline_starts:
+                        duration = int((current_time - offline_starts[ip]).total_seconds())
+                        await log_server_event(ip, "offline_end", duration_seconds=duration)
+                        await log_server_event(ip, "online", duration_seconds=0)
+                        del offline_starts[ip]
+                    elif status == "online":
+                        await log_server_event(ip, "online", duration_seconds=0)
+                    logger.info(f"Logged event for {ip}: {status}")
+                except Exception as e:
+                    logger.error(f"Failed to log event for {ip}: {str(e)}\n{traceback.format_exc()}")
+
         for ip, (payload, last_attempt) in list(pending_retries.items()):
             if current_time - last_attempt >= timedelta(minutes=5):
                 logger.info(f"Scheduling retry webhook for {ip}")
@@ -300,7 +352,7 @@ async def check_server_statuses():
 
         previous_statuses.clear()
         previous_statuses.update(current_statuses)
-        logger.debug(f"Updated previous statuses: {previous_statuses}")
+        logger.debug(f"Updated previous statuses: {current_statuses}")
     except Exception as e:
         logger.error(f"Error in background status check: {str(e)}\n{traceback.format_exc()}")
 
@@ -320,7 +372,15 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(NoCacheMiddleware)
+app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
 load_dotenv()
 XRAY_CHECKER_URL = f"http://{os.getenv('XRAY_CHECKER_HOST')}:{os.getenv('XRAY_CHECKER_PORT')}"
@@ -363,6 +423,16 @@ async def server_list_page():
             return HTMLResponse(content=f.read())
     except Exception as e:
         logger.error(f"Error serving server_list.html: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/nodemanager/uptime", response_class=HTMLResponse)
+async def uptime_page():
+    try:
+        with open("static/uptime.html") as f:
+            logger.info("Serving uptime.html")
+            return HTMLResponse(content=f.read())
+    except Exception as e:
+        logger.error(f"Error serving uptime.html: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/settings/subscription", response_class=HTMLResponse)
@@ -558,7 +628,7 @@ async def get_servers_api():
                 'ip': s[0],
                 'inbound_tag': s[1],
                 'install_date': s[2].isoformat() if s[2] else None
-            } for s in servers
+            } for s in servers if s[0] != 'n.unfence.nl'  # Exclude n.unfence.nl
         ]
         logger.info(f"Returning {len(formatted_servers)} servers")
         return {"servers": formatted_servers}
@@ -619,7 +689,7 @@ async def reboot_servers_api(request: RebootRequest):
             raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}")
     script_name = "reboot.sh"
     results = []
-    semaphore = asyncio.Semaphore(5)  # Уменьшено для стабильности
+    semaphore = asyncio.Semaphore(5)
     async def run_deploy_script(ip):
         async with semaphore:
             logger.info(f"Attempting to reboot server {ip} with script {script_name}")
@@ -656,7 +726,7 @@ async def run_scripts_api(request: RunScriptsRequest):
         logger.error(f"Script {request.script_name} not found in {Config.SCRIPTS_PATH}")
         raise HTTPException(status_code=400, detail=f"Script {request.script_name} not found")
     results = []
-    semaphore = asyncio.Semaphore(5)  # Уменьшено для стабильности
+    semaphore = asyncio.Semaphore(5)
     async def run_deploy_script(ip):
         async with semaphore:
             logger.info(f"Attempting to run script {request.script_name} on {ip}")
@@ -690,7 +760,7 @@ async def edit_server_api(request: EditServerRequest):
         raise HTTPException(status_code=400, detail="Invalid IP address")
     try:
         servers = await get_servers()
-        server = next((s for s in servers if s[0] == request.old_ip), None)
+        server = next((s for s in s if s[0] == request.old_ip), None)
         if not server:
             logger.error(f"Server {request.old_ip} not found")
             raise HTTPException(status_code=404, detail="Server not found")
@@ -746,8 +816,9 @@ async def get_server_status():
             match = re.match(pattern, line)
             if match:
                 ip, status = match.groups()
-                statuses[ip] = "online" if status == "1" else "offline"
-                logger.debug(f"Matched IP: {ip}, Status: {status}")
+                if ip != 'n.unfence.nl':  # Ignore n.unfence.nl
+                    statuses[ip] = "online" if status == "1" else "offline"
+                    logger.debug(f"Matched IP: {ip}, Status: {status}")
             else:
                 logger.debug(f"No match for line: {line}")
         
@@ -756,6 +827,61 @@ async def get_server_status():
     except Exception as e:
         logger.error(f"Error fetching Xray Checker metrics: {str(e)}\n{traceback.format_exc()}")
         return {"statuses": {}}
+
+@app.get("/api/server_events")
+async def get_server_events_api(period: str = Query('24h'), server_ip: str = Query(None), limit: int = Query(50)):
+    try:
+        period_hours = {'24h': 24, '7d': 168, '30d': 720}.get(period, 24)
+        events = await get_server_events(period_hours, server_ip, limit)
+        logger.info(f"Returning {len(events)} server events for period {period}")
+        formatted_events = [
+            {
+                'id': e['id'],
+                'server_ip': e['server_ip'],
+                'event_type': e['event_type'],
+                'event_time': e['event_time'],
+                'duration_seconds': e['duration_seconds'] if e['duration_seconds'] is not None else 0
+            } for e in events
+        ]
+        return {"events": formatted_events}
+    except Exception as e:
+        logger.error(f"Error fetching server events: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Failed to fetch server events")
+
+@app.get("/api/uptime/summary")
+async def get_uptime_summary(period: str = Query('24h')):
+    try:
+        period_hours = {'24h': 24, '7d': 168, '30d': 720}.get(period, 24)
+        servers = await get_servers()
+        statuses = (await get_server_status())['statuses']
+        events = await get_server_events(period_hours, limit=50)
+        
+        summary = []
+        for server in servers:
+            ip = server[0]
+            if ip == 'n.unfence.nl':  # Exclude n.unfence.nl
+                continue
+            server_events = [e for e in events if e['server_ip'] == ip]
+            total_checks = len(server_events)
+            online_checks = len([e for e in server_events if e['event_type'] == 'online'])
+            uptime_percentage = (online_checks / total_checks * 100) if total_checks > 0 else 100.0
+            
+            last_event = server_events[0] if server_events else None
+            last_check = last_event['event_time'] if last_event else datetime.utcnow().isoformat()
+            
+            summary.append({
+                'server_ip': ip,
+                'current_status': statuses.get(ip, 'offline'),
+                'uptime_percentage': round(uptime_percentage, 1),
+                'total_checks': total_checks,
+                'last_check': last_check
+            })
+        
+        logger.info(f"Returning uptime summary for {len(summary)} servers")
+        return {"data": summary}
+    except Exception as e:
+        logger.error(f"Error fetching uptime summary: {str(e)}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Failed to fetch uptime summary")
 
 async def check_ip_in_xray_checker(ip):
     host = 'localhost' if os.getenv('XRAY_CHECKER_HOST') in ['localhost', '127.0.0.1'] else os.getenv('XRAY_CHECKER_HOST')
