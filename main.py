@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import traceback
+import asyncpg
 from contextlib import asynccontextmanager
 from typing import List
 from fastapi import FastAPI, Form, HTTPException, Query
@@ -29,11 +30,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Store previous server statuses
 previous_statuses = {}
-# Store pending webhook retries with timestamp
 pending_retries = {}
-# Track offline start times
 offline_starts = {}
 
 class NoCacheMiddleware(BaseHTTPMiddleware):
@@ -69,67 +67,70 @@ def get_script_name(inbound_tag: str) -> str:
     logger.info(f"Generated script name: {script_name} for inbound_tag: {inbound_tag}")
     return script_name
 
+def is_valid_ip(ip: str) -> bool:
+    try:
+        ipaddress.ip_address(ip)
+        return True
+    except ValueError:
+        return False
+
 async def remove_existing_json(ip):
     remote_path = f"{os.getenv('XRAY_CHECKER_JSON_PATH')}/{ip}.json"
     try:
+        logger.debug(f"Attempting to remove JSON at {remote_path}")
         if os.getenv('XRAY_CHECKER_SSH_KEY') and os.getenv('XRAY_CHECKER_HOST') not in ['localhost', '127.0.0.1']:
-            logger.info(f"Checking for existing JSON at {remote_path} on remote host {os.getenv('XRAY_CHECKER_HOST')}")
+            logger.info(f"Removing JSON via SFTP at {remote_path} on {os.getenv('XRAY_CHECKER_HOST')}")
             async with asyncssh.connect(
                 os.getenv('XRAY_CHECKER_HOST'),
                 client_keys=[os.getenv('XRAY_CHECKER_SSH_KEY')],
                 known_hosts=None,
-                connect_timeout=15,
-                login_timeout=15
+                connect_timeout=30,
+                login_timeout=30
             ) as conn:
                 async with conn.start_sftp_client() as sftp:
                     try:
                         await sftp.stat(remote_path)
-                        logger.info(f"Found existing JSON at {remote_path}, removing it")
                         await sftp.remove(remote_path)
-                        logger.info(f"Removed existing JSON at {remote_path}")
+                        logger.info(f"Removed JSON at {remote_path}")
                     except asyncssh.SFTPError:
-                        logger.debug(f"No existing JSON found at {remote_path}")
+                        logger.debug(f"No JSON found at {remote_path}")
         elif os.getenv('XRAY_CHECKER_HOST') in ['localhost', '127.0.0.1']:
-            logger.info(f"Checking for existing JSON at {remote_path} locally")
+            logger.info(f"Removing local JSON at {remote_path}")
             if os.path.exists(remote_path):
-                logger.info(f"Found existing JSON at {remote_path}, removing it")
                 os.remove(remote_path)
-                logger.info(f"Removed existing JSON at {remote_path}")
+                logger.info(f"Removed JSON at {remote_path}")
             else:
-                logger.debug(f"No existing JSON found at {remote_path}")
+                logger.debug(f"No JSON found at {remote_path}")
         else:
-            logger.error("Invalid Xray Checker configuration: SSH key or host not set")
-            raise ValueError("SSH key or valid host required for Xray Checker")
+            logger.error("Invalid Xray Checker config: SSH key or host not set")
+            raise ValueError("SSH key or valid host required")
         return True
     except Exception as e:
-        logger.error(f"Failed to remove existing JSON for {ip}: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Failed to remove JSON for {ip}: {str(e)}\n{traceback.format_exc()}")
         return False
 
 async def restart_xray_checker():
     try:
         container_name = os.getenv('XRAY_CHECKER_CONTAINER_NAME', 'xraychecker-xray-checker')
-        logger.info(f"Attempting to restart Xray Checker container: {container_name}")
+        logger.info(f"Restarting Xray Checker container: {container_name}")
         if os.getenv('XRAY_CHECKER_SSH_KEY') and os.getenv('XRAY_CHECKER_HOST') not in ['localhost', '127.0.0.1']:
-            logger.info(f"Restarting Xray Checker on remote host {os.getenv('XRAY_CHECKER_HOST')}")
             async with asyncssh.connect(
                 os.getenv('XRAY_CHECKER_HOST'),
                 client_keys=[os.getenv('XRAY_CHECKER_SSH_KEY')],
                 known_hosts=None,
-                connect_timeout=15,
-                login_timeout=15
+                connect_timeout=30,
+                login_timeout=30
             ) as conn:
                 result = await conn.run(f'docker ps -a -q -f name={container_name}')
                 if not result.stdout.strip():
-                    logger.warning(f"Container {container_name} not found on {os.getenv('XRAY_CHECKER_HOST')}, skipping restart")
+                    logger.warning(f"Container {container_name} not found, skipping restart")
                     return True
                 result = await conn.run(f'sudo docker restart {container_name}')
                 if result.exit_status != 0:
                     logger.error(f"Docker restart failed: {result.stderr}")
                     raise Exception(f"Docker restart failed: {result.stderr}")
-                else:
-                    logger.info("Xray Checker restarted successfully")
+                logger.info("Xray Checker restarted successfully")
         elif os.getenv('XRAY_CHECKER_HOST') in ['localhost', '127.0.0.1']:
-            logger.info("Restarting Xray Checker locally")
             result = subprocess.run(['docker', 'ps', '-a', '-q', '-f', f'name={container_name}'], capture_output=True, text=True)
             if not result.stdout.strip():
                 logger.warning(f"Container {container_name} not found locally, skipping restart")
@@ -138,11 +139,10 @@ async def restart_xray_checker():
             if result.returncode != 0:
                 logger.error(f"Docker restart failed: {result.stderr}")
                 raise Exception(f"Docker restart failed: {result.stderr}")
-            else:
-                logger.info("Xray Checker restarted successfully")
+            logger.info("Xray Checker restarted successfully")
         else:
-            logger.error("Invalid Xray Checker configuration: SSH key or host not set")
-            raise ValueError("SSH key or valid host required for Xray Checker")
+            logger.error("Invalid Xray Checker config: SSH key or host not set")
+            raise ValueError("SSH key or valid host required")
         return True
     except Exception as e:
         logger.error(f"Failed to restart Xray Checker: {str(e)}\n{traceback.format_exc()}")
@@ -152,34 +152,31 @@ async def copy_json_to_xray_checker(ip, json_data):
     local_path = f"/config/outbounds/{ip}.json"
     remote_path = f"{os.getenv('XRAY_CHECKER_JSON_PATH')}/{ip}.json"
     try:
-        logger.debug(f"Starting JSON creation at {local_path} for IP {ip}")
-        logger.debug(f"JSON data: {json.dumps(json_data, indent=2)}")
+        logger.debug(f"Creating JSON at {local_path} for {ip}")
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         with open(local_path, "w") as f:
             json.dump(json_data, f, indent=2)
-        logger.info(f"JSON created successfully at {local_path}")
+        logger.info(f"JSON created at {local_path}")
 
         if not os.getenv('XRAY_CHECKER_JSON_PATH'):
-            logger.error("XRAY_CHECKER_JSON_PATH not set in .env")
+            logger.error("XRAY_CHECKER_JSON_PATH not set")
             raise ValueError("XRAY_CHECKER_JSON_PATH not set")
 
         if os.getenv('XRAY_CHECKER_SSH_KEY') and os.getenv('XRAY_CHECKER_HOST') not in ['localhost', '127.0.0.1']:
-            logger.info(f"Copying JSON to remote {remote_path} via SFTP (host: {os.getenv('XRAY_CHECKER_HOST')})")
+            logger.info(f"Copying JSON to {remote_path} via SFTP")
             async with asyncssh.connect(
                 os.getenv('XRAY_CHECKER_HOST'),
                 client_keys=[os.getenv('XRAY_CHECKER_SSH_KEY')],
                 known_hosts=None,
-                connect_timeout=15,
-                login_timeout=15
+                connect_timeout=30,
+                login_timeout=30
             ) as conn:
                 async with conn.start_sftp_client() as sftp:
                     try:
                         await sftp.stat(os.path.dirname(remote_path))
-                        logger.debug(f"Remote path {os.path.dirname(remote_path)} exists")
                     except asyncssh.SFTPError:
-                        logger.info(f"Remote path {os.path.dirname(remote_path)} does not exist, creating it")
                         await sftp.makedirs(os.path.dirname(remote_path))
-                        logger.info(f"Created remote directory {os.path.dirname(remote_path)}")
+                        logger.info(f"Created directory {os.path.dirname(remote_path)}")
                     await sftp.put(local_path, remote_path)
                     logger.info(f"JSON copied to {remote_path}")
         elif os.getenv('XRAY_CHECKER_HOST') in ['localhost', '127.0.0.1']:
@@ -188,24 +185,28 @@ async def copy_json_to_xray_checker(ip, json_data):
             shutil.copy2(local_path, remote_path)
             logger.info(f"JSON copied to {remote_path}")
         else:
-            logger.error("Invalid Xray Checker configuration: SSH key or host not set")
-            raise ValueError("SSH key or valid host required for Xray Checker")
+            logger.error("Invalid Xray Checker config: SSH key or host not set")
+            raise ValueError("SSH key or valid host required")
         return True
     except Exception as e:
         logger.error(f"Failed to copy JSON for {ip}: {str(e)}\n{traceback.format_exc()}")
         return False
     finally:
         if os.path.exists(local_path):
-            logger.info(f"Removing temporary JSON at {local_path}")
+            logger.info(f"Removing temp JSON at {local_path}")
             os.remove(local_path)
 
 async def update_xray_checker_json(ip, inbound_tag, vless_key):
     try:
+        logger.debug(f"Updating Xray Checker JSON for {ip} with tag {inbound_tag}")
+        if not await remove_existing_json(ip):
+            logger.warning(f"Failed to remove existing JSON for {ip}, proceeding with update")
         json_data = create_outbound_json(ip, inbound_tag, vless_key)
         if not json_data:
             logger.error(f"create_outbound_json returned None for {ip}")
             raise ValueError("Failed to create outbound JSON")
         if not await copy_json_to_xray_checker(ip, json_data):
+            logger.error(f"Failed to copy JSON for {ip}")
             raise ValueError(f"Failed to copy JSON for {ip}")
         if not await restart_xray_checker():
             logger.warning(f"Failed to restart Xray Checker for {ip}, but JSON copied")
@@ -213,6 +214,24 @@ async def update_xray_checker_json(ip, inbound_tag, vless_key):
         return True
     except Exception as e:
         logger.error(f"Failed to update JSON for {ip}: {str(e)}\n{traceback.format_exc()}")
+        return False
+
+async def check_ip_in_xray_checker(ip):
+    host = 'localhost' if os.getenv('XRAY_CHECKER_HOST') in ['localhost', '127.0.0.1'] else os.getenv('XRAY_CHECKER_HOST')
+    url = f"http://{host}:{os.getenv('XRAY_CHECKER_PORT')}/metrics"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.error(f"Xray Checker status: {response.status}")
+                    return False
+                metrics = await response.text()
+                pattern = rf'xray_proxy_status{{[^}}]*address="{ip}:\d+"[^}}]*}} \d'
+                exists = bool(re.search(pattern, metrics))
+                logger.debug(f"IP {ip} in XrayChecker: {exists}")
+                return exists
+    except Exception as e:
+        logger.error(f"Error checking IP {ip}: {str(e)}\n{traceback.format_exc()}")
         return False
 
 async def update_vless_keys_from_subscription():
@@ -231,81 +250,73 @@ async def update_vless_keys_from_subscription():
 async def check_server_statuses():
     global previous_statuses, pending_retries, offline_starts
     try:
-        logger.debug("Checking server statuses in background")
+        logger.debug("Checking server statuses")
         current_statuses = {}
         
-        # Fetch known servers from database
         servers = await get_servers()
-        valid_ips = {server[0] for server in servers}
+        valid_ips = {server[0] for server in servers if is_valid_ip(server[0])}
         logger.debug(f"Valid server IPs from database: {valid_ips}")
 
-        # Try fetching metrics from Xray Checker
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-            try:
-                async with session.get(f"{XRAY_CHECKER_URL}/metrics") as response:
-                    logger.info(f"Xray Checker /metrics status: {response.status}")
-                    if response.status != 200:
-                        logger.error(f"Xray Checker returned status: {response.status}, reason: {response.reason}")
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with session.get(f"{XRAY_CHECKER_URL}/metrics") as response:
+                logger.info(f"Xray Checker /metrics status: {response.status}")
+                if response.status != 200:
+                    logger.error(f"Xray Checker status: {response.status}, reason: {response.reason}")
+                    return
+                metrics = await response.text()
+                logger.debug(f"Metrics response: {metrics[:500]}")
+                pattern = r'xray_proxy_status\{[^}]*address="([^:]+):\d+"[^}]*protocol="[^"]+"[^}]*\} (\d)'
+                for line in metrics.splitlines():
+                    match = re.match(pattern, line)
+                    if match:
+                        ip, status = match.groups()
+                        if is_valid_ip(ip) and ip in valid_ips:
+                            current_statuses[ip] = "online" if status == "1" else "offline"
+                            logger.debug(f"Parsed IP: {ip}, Status: {status}")
+                        else:
+                            logger.debug(f"Skipping IP {ip}: not in servers or invalid")
                     else:
-                        metrics = await response.text()
-                        logger.debug(f"Metrics response: {metrics[:500]}")
-                        pattern = r'xray_proxy_status\{[^}]*address="([^:]+):\d+"[^}]*protocol="[^"]+"[^}]*\} (\d)'
-                        for line in metrics.splitlines():
-                            match = re.match(pattern, line)
-                            if match:
-                                ip, status = match.groups()
-                                if ip in valid_ips and ip != 'n.unfence.nl':  # Explicitly ignore n.unfence.nl
-                                    current_statuses[ip] = "online" if status == "1" else "offline"
-                                    logger.debug(f"Parsed IP: {ip}, Status: {status}")
-                                else:
-                                    logger.warning(f"Ignoring IP from metrics: {ip}")
-                            else:
-                                logger.debug(f"No match for metric line: {line}")
-            except Exception as e:
-                logger.error(f"Failed to fetch Xray Checker metrics: {str(e)}\n{traceback.format_exc()}")
+                        logger.debug(f"No match for metric line: {line}")
 
-        # If no statuses from metrics, check servers from database
         if not current_statuses:
-            logger.warning("No statuses parsed from metrics, falling back to database servers")
+            logger.warning("No statuses parsed, falling back to database")
             for server in servers:
                 ip = server[0]
-                if ip != 'n.unfence.nl':  # Ignore n.unfence.nl
-                    current_statuses[ip] = "offline"  # Default to offline if metrics unavailable
+                if is_valid_ip(ip):
+                    current_statuses[ip] = "offline"
                     logger.debug(f"Added IP from database: {ip}, Status: offline")
 
         if not current_statuses:
-            logger.error("No server statuses available from metrics or database")
+            logger.error("No server statuses available")
             return
 
         logger.debug(f"Current statuses: {current_statuses}")
         logger.debug(f"Previous statuses: {previous_statuses}")
 
-        nodemonitoring_host = os.getenv('NODEMONITORING_HOST')
-        nodemonitoring_port = os.getenv('NODEMONITORING_PORT')
-        
-        if not nodemonitoring_host or not nodemonitoring_port:
-            logger.error(f"NODEMONITORING_HOST or NODEMONITORING_PORT not set in .env: host={nodemonitoring_host}, port={nodemonitoring_port}")
-            return
-
-        webhook_url = f"http://{nodemonitoring_host}:{nodemonitoring_port}/api/kuma/alert"
+        webhook_url = f"http://{os.getenv('NODEMONITORING_HOST')}:{os.getenv('NODEMONITORING_PORT')}/api/kuma/alert"
         logger.info(f"Preparing to send webhook to: {webhook_url}")
 
-        semaphore = asyncio.Semaphore(10)
+        semaphore = asyncio.Semaphore(1)
+        @retrying.retry(
+            stop_max_attempt_number=3,
+            wait_fixed=5000,
+            retry_on_exception=lambda e: isinstance(e, (asyncio.TimeoutError, aiohttp.ClientError))
+        )
         async def send_webhook(ip, payload):
             async with semaphore:
                 try:
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                         async with session.post(webhook_url, json=payload) as resp:
                             response_text = await resp.text()
                             logger.debug(f"Webhook response for {ip}: status={resp.status}, response={response_text}")
                             if resp.status != 200:
-                                logger.error(f"Failed to send webhook for {ip}: status={resp.status}, response={response_text}")
+                                logger.error(f"Webhook failed for {ip}: status={resp.status}")
                                 return False
-                            logger.info(f"Webhook sent for {ip}: {payload}, response={response_text}")
+                            logger.info(f"Webhook sent for {ip}: {payload}")
                             return True
                 except Exception as e:
-                    logger.error(f"Error sending webhook for {ip}: {str(e)}\n{traceback.format_exc()}")
-                    return False
+                    logger.error(f"Webhook error for {ip}: {str(e)}\n{traceback.format_exc()}")
+                    raise
 
         current_time = datetime.utcnow()
         tasks = []
@@ -319,7 +330,6 @@ async def check_server_statuses():
                 }
                 tasks.append((ip, webhook_payload))
 
-                # Log event with duration_seconds
                 try:
                     if status == "offline":
                         await log_server_event(ip, "offline_start", duration_seconds=0)
@@ -337,7 +347,7 @@ async def check_server_statuses():
 
         for ip, (payload, last_attempt) in list(pending_retries.items()):
             if current_time - last_attempt >= timedelta(minutes=5):
-                logger.info(f"Scheduling retry webhook for {ip}")
+                logger.info(f"Retrying webhook for {ip}")
                 tasks.append((ip, payload))
                 del pending_retries[ip]
 
@@ -346,7 +356,7 @@ async def check_server_statuses():
             for (ip, payload), result in zip(tasks, results):
                 if isinstance(result, Exception) or result is False:
                     pending_retries[ip] = (payload, current_time)
-                    logger.error(f"Webhook for {ip} failed, scheduled retry in 5 minutes")
+                    logger.error(f"Webhook for {ip} failed, retry in 5 min")
                 else:
                     logger.info(f"Webhook for {ip} succeeded")
 
@@ -354,7 +364,7 @@ async def check_server_statuses():
         previous_statuses.update(current_statuses)
         logger.debug(f"Updated previous statuses: {current_statuses}")
     except Exception as e:
-        logger.error(f"Error in background status check: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error in status check: {str(e)}\n{traceback.format_exc()}")
 
 scheduler = AsyncIOScheduler()
 
@@ -362,12 +372,12 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app: FastAPI):
     try:
         await init_db()
-        logger.info("Database initialized successfully")
+        logger.info("Database initialized")
         scheduler.add_job(update_vless_keys_from_subscription, 'interval', hours=int(os.getenv('SUBSCRIPTION_REFRESH_HOURS', 1)))
         scheduler.add_job(check_server_statuses, 'interval', minutes=1)
         scheduler.start()
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}\n{traceback.format_exc()}")
+        logger.error(f"Failed to initialize database: {str(e)}\n{traceback.format_exc()}")
         raise
     yield
 
@@ -392,7 +402,7 @@ async def index():
             logger.info("Serving index.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
-        logger.error(f"Error serving index.html: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error serving index.html: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/add", response_class=HTMLResponse)
@@ -402,7 +412,7 @@ async def add_server_page():
             logger.info("Serving add_server.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
-        logger.error(f"Error serving add_server.html: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error serving add_server.html: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/setup", response_class=HTMLResponse)
@@ -412,7 +422,7 @@ async def setup_server_page():
             logger.info("Serving setup_server.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
-        logger.error(f"Error serving setup_server.html: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error serving setup_server.html: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/list", response_class=HTMLResponse)
@@ -422,7 +432,7 @@ async def server_list_page():
             logger.info("Serving server_list.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
-        logger.error(f"Error serving server_list.html: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error serving server_list.html: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/uptime", response_class=HTMLResponse)
@@ -432,7 +442,7 @@ async def uptime_page():
             logger.info("Serving uptime.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
-        logger.error(f"Error serving uptime.html: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error serving uptime.html: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/settings/subscription", response_class=HTMLResponse)
@@ -442,7 +452,7 @@ async def settings_subscription_page():
             logger.info("Serving settings_subscription.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
-        logger.error(f"Error serving settings_subscription.html: {e}\n{traceback.format_exc()}")
+        logger.error(f"Error serving settings_subscription.html: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/vless_keys")
@@ -455,7 +465,7 @@ async def get_vless_keys_api():
         logger.info(f"Returning {len(keys)} vless keys")
         return {"data": keys}
     except Exception as e:
-        logger.error(f"Failed to fetch vless keys: {e}\n{traceback.format_exc()}")
+        logger.error(f"Failed to fetch vless keys: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to fetch vless keys")
 
 @app.get("/api/inbound_tags")
@@ -479,7 +489,7 @@ async def get_scripts():
         logger.info(f"Returning {len(scripts)} scripts")
         return {"scripts": scripts}
     except Exception as e:
-        logger.error(f"Failed to fetch scripts: {e}\n{traceback.format_exc()}")
+        logger.error(f"Failed to fetch scripts: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to fetch scripts")
 
 @app.get("/api/settings")
@@ -520,7 +530,9 @@ async def add_server_api(request: AddServerRequest):
     logger.debug(f"Received /api/add_server request: {request}")
     try:
         for ip in request.ips:
-            ipaddress.ip_address(ip)
+            if not is_valid_ip(ip):
+                logger.error(f"Invalid IP address: {ip}")
+                raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}")
     except ValueError:
         logger.error(f"Invalid IP address in {request.ips}\n{traceback.format_exc()}")
         raise HTTPException(status_code=400, detail="Invalid IP address")
@@ -540,29 +552,37 @@ async def add_server_api(request: AddServerRequest):
                 if not key:
                     logger.error(f"Location {request.inbound_tag} not found for {ip}")
                     return {"ip": ip, "success": False, "message": f"Location {request.inbound_tag} not found"}
-                if not await check_ip_in_xray_checker(ip):
-                    if not await update_xray_checker_json(ip, request.inbound_tag, key['vless_key']):
-                        return {"ip": ip, "success": False, "message": "Failed to update Xray Checker JSON"}
+                if await check_ip_in_xray_checker(ip):
+                    logger.debug(f"IP {ip} already in XrayChecker, forcing JSON update")
+                if not await update_xray_checker_json(ip, request.inbound_tag, key['vless_key']):
+                    return {"ip": ip, "success": False, "message": "Failed to update Xray Checker JSON"}
                 success, message = await deploy_script(ip, script_name)
                 logger.debug(f"deploy_script result for {ip}: success={success}, message={message}")
                 if not isinstance(success, bool):
                     logger.error(f"Invalid success type from deploy_script: {success} for {ip}")
                     return {"ip": ip, "success": False, "message": f"Invalid deploy_script response: {success}"}
                 if success:
-                    add_success = await add_server(ip, request.inbound_tag)
-                    logger.debug(f"add_server result for {ip}: {add_success}")
-                    if isinstance(add_success, str):
-                        logger.warning(f"add_server returned string '{add_success}' for {ip}, converting to bool")
-                        add_success = add_success.lower() == 'true'
-                    if not isinstance(add_success, bool):
-                        logger.error(f"Invalid add_server response: {add_success} for {ip}")
-                        return {"ip": ip, "success": False, "message": f"Invalid add_server response: {add_success}"}
-                    if add_success:
-                        logger.info(f"Server {ip} added successfully")
-                        return {"ip": ip, "success": True, "message": "Server added successfully"}
-                    else:
-                        logger.error(f"Failed to save server {ip} to database")
-                        return {"ip": ip, "success": False, "message": "Failed to save server to database"}
+                    # Update or insert server in database
+                    conn = await asyncpg.connect(
+                        database=os.getenv('LOCAL_DB_DBNAME'),
+                        user=os.getenv('LOCAL_DB_USER'),
+                        password=os.getenv('LOCAL_DB_PASSWORD'),
+                        host=os.getenv('LOCAL_DB_HOST', 'localhost'),
+                        port=os.getenv('LOCAL_DB_PORT', '5432')
+                    )
+                    async with conn.transaction():
+                        await conn.execute(
+                            """
+                            INSERT INTO servers (ip, inbound_tag, install_date)
+                            VALUES ($1, $2, CURRENT_TIMESTAMP)
+                            ON CONFLICT (ip) DO UPDATE
+                            SET inbound_tag = $2, install_date = CURRENT_TIMESTAMP
+                            """,
+                            ip, request.inbound_tag
+                        )
+                    await conn.close()
+                    logger.info(f"Server {ip} added/updated successfully")
+                    return {"ip": ip, "success": True, "message": "Server added successfully"}
                 logger.error(f"Failed to deploy script on {ip}: {message}")
                 return {"ip": ip, "success": False, "message": message}
             except Exception as e:
@@ -579,7 +599,9 @@ async def add_server_manual_api(request: AddServerRequest):
     logger.debug(f"Received /api/add_server_manual request: {request}")
     try:
         for ip in request.ips:
-            ipaddress.ip_address(ip)
+            if not is_valid_ip(ip):
+                logger.error(f"Invalid IP address: {ip}")
+                raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}")
     except ValueError:
         logger.error(f"Invalid IP address in {request.ips}\n{traceback.format_exc()}")
         raise HTTPException(status_code=400, detail="Invalid IP address")
@@ -593,25 +615,32 @@ async def add_server_manual_api(request: AddServerRequest):
                 logger.error(f"Location {request.inbound_tag} not found for {ip}")
                 results.append({"ip": ip, "success": False, "message": f"Location {request.inbound_tag} not found"})
                 continue
-            if not await check_ip_in_xray_checker(ip):
-                if not await update_xray_checker_json(ip, request.inbound_tag, key['vless_key']):
-                    results.append({"ip": ip, "success": False, "message": "Failed to update Xray Checker JSON"})
-                    continue
-            add_success = await add_server(ip, request.inbound_tag)
-            logger.debug(f"add_server result for {ip}: {add_success}")
-            if isinstance(add_success, str):
-                logger.warning(f"add_server returned string '{add_success}' for {ip}, converting to bool")
-                add_success = add_success.lower() == 'true'
-            if not isinstance(add_success, bool):
-                logger.error(f"Invalid add_server response: {add_success} for {ip}")
-                results.append({"ip": ip, "success": False, "message": f"Invalid add_server response: {add_success}"})
+            if await check_ip_in_xray_checker(ip):
+                logger.debug(f"IP {ip} already in XrayChecker, forcing JSON update")
+            if not await update_xray_checker_json(ip, request.inbound_tag, key['vless_key']):
+                results.append({"ip": ip, "success": False, "message": "Failed to update Xray Checker JSON"})
                 continue
-            if add_success:
-                logger.info(f"Server {ip} added successfully")
-                results.append({"ip": ip, "success": True, "message": "Server added successfully"})
-            else:
-                logger.error(f"Failed to save server {ip} to database")
-                results.append({"ip": ip, "success": False, "message": "Failed to save server to database"})
+            # Update or insert server in database
+            conn = await asyncpg.connect(
+                database=os.getenv('LOCAL_DB_DBNAME'),
+                user=os.getenv('LOCAL_DB_USER'),
+                password=os.getenv('LOCAL_DB_PASSWORD'),
+                host=os.getenv('LOCAL_DB_HOST', 'localhost'),
+                port=os.getenv('LOCAL_DB_PORT', '5432')
+            )
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    INSERT INTO servers (ip, inbound_tag, install_date)
+                    VALUES ($1, $2, CURRENT_TIMESTAMP)
+                    ON CONFLICT (ip) DO UPDATE
+                    SET inbound_tag = $2, install_date = CURRENT_TIMESTAMP
+                    """,
+                    ip, request.inbound_tag
+                )
+            await conn.close()
+            logger.info(f"Server {ip} added/updated successfully")
+            results.append({"ip": ip, "success": True, "message": "Server added successfully"})
         except Exception as e:
             logger.error(f"Error adding server {ip}: {str(e)}\n{traceback.format_exc()}")
             results.append({"ip": ip, "success": False, "message": str(e)})
@@ -628,12 +657,12 @@ async def get_servers_api():
                 'ip': s[0],
                 'inbound_tag': s[1],
                 'install_date': s[2].isoformat() if s[2] else None
-            } for s in servers if s[0] != 'n.unfence.nl'  # Exclude n.unfence.nl
+            } for s in servers if is_valid_ip(s[0])
         ]
         logger.info(f"Returning {len(formatted_servers)} servers")
         return {"servers": formatted_servers}
     except Exception as e:
-        logger.error(f"Failed to fetch servers: {e}\n{traceback.format_exc()}")
+        logger.error(f"Failed to fetch servers: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to fetch servers")
 
 @app.delete("/api/delete_server")
@@ -760,7 +789,7 @@ async def edit_server_api(request: EditServerRequest):
         raise HTTPException(status_code=400, detail="Invalid IP address")
     try:
         servers = await get_servers()
-        server = next((s for s in s if s[0] == request.old_ip), None)
+        server = next((s for s in servers if s[0] == request.old_ip), None)
         if not server:
             logger.error(f"Server {request.old_ip} not found")
             raise HTTPException(status_code=404, detail="Server not found")
@@ -768,24 +797,46 @@ async def edit_server_api(request: EditServerRequest):
         if not key:
             logger.error(f"Inbound tag {request.new_inbound_tag} not found")
             raise HTTPException(status_code=400, detail=f"Inbound tag {request.new_inbound_tag} not found")
-        if request.old_ip != request.new_ip or server[1] != request.new_inbound_tag:
-            if not await remove_existing_json(request.old_ip):
-                logger.error(f"Failed to remove JSON for {request.old_ip}")
-                raise HTTPException(status_code=500, detail="Failed to remove old JSON")
-        if not await update_xray_checker_json(request.new_ip, request.new_inbound_tag, key['vless_key']):
-            logger.error(f"Failed to update JSON for {request.new_ip}")
-            raise HTTPException(status_code=500, detail="Failed to update Xray Checker JSON")
-        if not await delete_server(request.old_ip):
-            logger.error(f"Failed to delete {request.old_ip} from database")
-            raise HTTPException(status_code=500, detail="Failed to update database")
-        if not await add_server(request.new_ip, request.new_inbound_tag):
-            logger.error(f"Failed to add {request.new_ip} to database")
-            raise HTTPException(status_code=500, detail="Failed to update database")
+        
+        conn = await asyncpg.connect(
+            database=os.getenv('LOCAL_DB_DBNAME'),
+            user=os.getenv('LOCAL_DB_USER'),
+            password=os.getenv('LOCAL_DB_PASSWORD'),
+            host=os.getenv('LOCAL_DB_HOST', 'localhost'),
+            port=os.getenv('LOCAL_DB_PORT', '5432')
+        )
+        async with conn.transaction():
+            if request.old_ip != request.new_ip or server[1] != request.new_inbound_tag:
+                if not await remove_existing_json(request.old_ip):
+                    logger.error(f"Failed to remove JSON for {request.old_ip}")
+                    raise HTTPException(status_code=500, detail="Failed to remove old JSON")
+            if not await update_xray_checker_json(request.new_ip, request.new_inbound_tag, key['vless_key']):
+                logger.error(f"Failed to update JSON for {request.new_ip}")
+                raise HTTPException(status_code=500, detail="Failed to update Xray Checker JSON")
+            
+            delete_result = await conn.execute("DELETE FROM servers WHERE ip = $1", request.old_ip)
+            logger.debug(f"Delete result for {request.old_ip}: {delete_result}")
+            if delete_result == 'DELETE 0':
+                logger.error(f"Failed to delete {request.old_ip} from database: not found")
+                raise HTTPException(status_code=500, detail="Failed to update database: server not found")
+            
+            await conn.execute(
+                """
+                INSERT INTO servers (ip, inbound_tag, install_date)
+                VALUES ($1, $2, CURRENT_TIMESTAMP)
+                ON CONFLICT (ip) DO UPDATE
+                SET inbound_tag = $2, install_date = CURRENT_TIMESTAMP
+                """,
+                request.new_ip, request.new_inbound_tag
+            )
+            logger.debug(f"Added new server {request.new_ip} with inbound_tag {request.new_inbound_tag}")
+        
+        await conn.close()
         logger.info(f"Server updated: {request.old_ip} -> {request.new_ip}, inbound_tag: {request.new_inbound_tag}")
         return {"success": True, "message": "Server updated"}
     except Exception as e:
         logger.error(f"Error editing {request.old_ip}: {str(e)}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to update database: {str(e)}")
 
 @app.get("/api/check_availability")
 async def check_availability_api(ip: str):
@@ -800,7 +851,7 @@ async def check_availability_api(ip: str):
 @app.get("/api/server_status")
 async def get_server_status():
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             async with session.get(f"{XRAY_CHECKER_URL}/metrics") as response:
                 logger.info(f"Xray Checker /metrics status: {response.status}")
                 if response.status != 200:
@@ -816,9 +867,11 @@ async def get_server_status():
             match = re.match(pattern, line)
             if match:
                 ip, status = match.groups()
-                if ip != 'n.unfence.nl':  # Ignore n.unfence.nl
+                if is_valid_ip(ip):
                     statuses[ip] = "online" if status == "1" else "offline"
                     logger.debug(f"Matched IP: {ip}, Status: {status}")
+                else:
+                    logger.debug(f"Ignoring non-IP address: {ip}")
             else:
                 logger.debug(f"No match for line: {line}")
         
@@ -855,11 +908,12 @@ async def get_uptime_summary(period: str = Query('24h')):
         servers = await get_servers()
         statuses = (await get_server_status())['statuses']
         events = await get_server_events(period_hours, limit=50)
+        logger.debug(f"Fetched {len(events)} events for uptime summary")
         
         summary = []
         for server in servers:
             ip = server[0]
-            if ip == 'n.unfence.nl':  # Exclude n.unfence.nl
+            if not is_valid_ip(ip):
                 continue
             server_events = [e for e in events if e['server_ip'] == ip]
             total_checks = len(server_events)
@@ -882,22 +936,6 @@ async def get_uptime_summary(period: str = Query('24h')):
     except Exception as e:
         logger.error(f"Error fetching uptime summary: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to fetch uptime summary")
-
-async def check_ip_in_xray_checker(ip):
-    host = 'localhost' if os.getenv('XRAY_CHECKER_HOST') in ['localhost', '127.0.0.1'] else os.getenv('XRAY_CHECKER_HOST')
-    url = f"http://{host}:{os.getenv('XRAY_CHECKER_PORT')}/metrics"
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-            async with session.get(url) as response:
-                if response.status != 200:
-                    logger.error(f"Xray Checker status: {response.status}")
-                    return False
-                metrics = await response.text()
-                pattern = rf'xray_proxy_status{{[^}}]*address="{ip}:\d+"[^}}]*}} \d'
-                return bool(re.search(pattern, metrics))
-    except Exception as e:
-        logger.error(f"Error checking IP {ip}: {str(e)}\n{traceback.format_exc()}")
-        return False
 
 def show_toast(message, type):
     logger.info(f"Toast: {type} - {message}")
