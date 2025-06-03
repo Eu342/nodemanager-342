@@ -1,7 +1,10 @@
-const SCRIPT_VERSION = '2025-05-30-v8';
+const SCRIPT_VERSION = '2025-06-03-v16';
 let currentPeriod = '24h';
 let serversData = [];
 let eventsData = [];
+let currentFilter = 'all';
+let searchQuery = '';
+let eventLimit = 20; // Default event limit
 
 function waitForElement(id, maxAttempts = 100, delay = 200) {
     return new Promise((resolve, reject) => {
@@ -47,7 +50,6 @@ async function fetchWithRetry(url, retries = 3, delay = 1000) {
 document.addEventListener('DOMContentLoaded', async () => {
     console.log(`uptime.js v${SCRIPT_VERSION} loaded at ${new Date().toISOString()}`);
     try {
-        // Removed waitForElement('app-container')
         loadTheme();
         await loadData();
         setupEventListeners();
@@ -81,6 +83,34 @@ function setupEventListeners() {
     }
     const themeButton = document.getElementById('themeButton');
     if (themeButton) themeButton.addEventListener('click', toggleTheme);
+
+    const serverSearch = document.getElementById('serverSearch');
+    if (serverSearch) {
+        serverSearch.addEventListener('input', (e) => {
+            searchQuery = e.target.value.toLowerCase();
+            renderServersGrid();
+        });
+    }
+
+    const filterButtons = document.querySelectorAll('.filter-button');
+    filterButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            currentFilter = button.dataset.filter;
+            filterButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            renderServersGrid();
+        });
+    });
+
+    const eventLimitButtons = document.querySelectorAll('.event-limit-button');
+    eventLimitButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            eventLimit = parseInt(button.dataset.limit);
+            eventLimitButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+            renderEvents();
+        });
+    });
 }
 
 async function loadData() {
@@ -94,9 +124,21 @@ async function loadData() {
         console.log('Summary data loaded:', serversData);
 
         console.log('Loading /api/server_events');
-        const eventsDataResponse = await fetchWithRetry(`/api/server_events?period=${currentPeriod}`);
+        const eventsDataResponse = await fetchWithRetry(`/api/server_events?period=${currentPeriod}&limit=100`);
         eventsData = eventsDataResponse.events || [];
         console.log('Events data loaded:', eventsData);
+
+        console.log('Loading /api/servers for inbound tags');
+        const serversResponse = await fetchWithRetry('/api/servers');
+        const serverTags = serversResponse.servers.reduce((acc, server) => {
+            acc[server.ip] = server.inbound_tag;
+            return acc;
+        }, {});
+        serversData = serversData.map(server => ({
+            ...server,
+            inbound_tag: serverTags[server.server_ip] || 'N/A'
+        }));
+        console.log('Servers with tags:', serversData);
 
         await updateStats();
         await renderServersGrid();
@@ -117,38 +159,59 @@ async function loadData() {
 async function updateStats() {
     try {
         console.log('Updating stats');
-        const [totalServers, onlineServers, averageUptime] = await Promise.all([
+        const [totalServers, onlineServers, averageUptime, allCount, activeCount, problematicCount] = await Promise.all([
             waitForElement('totalServers'),
             waitForElement('onlineServers'),
-            waitForElement('averageUptime')
+            waitForElement('averageUptime'),
+            waitForElement('allCount').catch(() => null),
+            waitForElement('activeCount').catch(() => null),
+            waitForElement('problematicCount').catch(() => null)
         ]);
         const total = serversData.length;
         const online = serversData.filter(s => s.current_status === 'online').length;
+        const problematic = serversData.filter(s => s.current_status === 'offline' || s.current_status === 'unknown').length;
         const average = total > 0 ? serversData.reduce((sum, s) => sum + s.uptime_percentage, 0) / total : 0;
         totalServers.innerHTML = total;
         onlineServers.innerHTML = online;
         averageUptime.innerHTML = average.toFixed(1) + '%';
-        console.log('Stats updated:', { total, online, average });
+        if (allCount) allCount.innerHTML = total;
+        if (activeCount) activeCount.innerHTML = online;
+        if (problematicCount) problematicCount.innerHTML = problematic;
+        console.log('Stats updated:', { total, online, problematic, average });
     } catch (err) {
         console.error('Stats render error:', err);
     }
+}
+
+function filterServers(servers) {
+    return servers.filter(server => {
+        const matchesSearch = !searchQuery || 
+            server.server_ip.toLowerCase().includes(searchQuery) ||
+            (server.inbound_tag && server.inbound_tag.toLowerCase().includes(searchQuery));
+        const matchesFilter = currentFilter === 'all' ||
+            (currentFilter === 'active' && server.current_status === 'online') ||
+            (currentFilter === 'problematic' && (server.current_status === 'offline' || server.current_status === 'unknown'));
+        return matchesSearch && matchesFilter;
+    });
 }
 
 async function renderServersGrid() {
     try {
         console.log('Rendering servers grid');
         const container = await waitForElement('serversGrid');
-        if (!serversData.length) {
-            container.innerHTML = '<div style="text-align: center; padding: 40px; grid-column: 1 / -1;">Нет данных о серверах</div>';
+        const filteredServers = filterServers(serversData);
+        if (!filteredServers.length) {
+            container.innerHTML = '<div style="text-align: center; padding: 40px; grid-column: 1 / -1;">Нет серверов по заданным критериям</div>';
             return;
         }
-        container.innerHTML = serversData.map(server => {
+        container.innerHTML = filteredServers.map(server => {
             const uptimeClass = server.uptime_percentage >= 95 ? '' : server.uptime_percentage >= 80 ? 'medium' : 'low';
+            const statusClass = server.current_status === 'unknown' ? 'unknown' : server.current_status;
             return `
-                <div class="server-uptime-card ${server.current_status}">
+                <div class="server-uptime-card ${statusClass}">
                     <div class="server-header">
                         <div class="server-info">
-                            <div class="server-status-indicator ${server.current_status}"></div>
+                            <div class="server-status-indicator ${statusClass}"></div>
                             <div class="server-ip">${server.server_ip}</div>
                         </div>
                         <div class="uptime-percentage ${uptimeClass}">${server.uptime_percentage.toFixed(1)}%</div>
@@ -157,8 +220,8 @@ async function renderServersGrid() {
                         ${renderTimeline(server.server_ip)}
                     </div>
                     <div class="server-meta">
-                        <span>Проверок: ${server.total_checks}</span>
-                        <span>Последняя: ${formatDate(server.last_check)}</span>
+                        <span>Событий: ${server.total_events}</span>
+                        <span>Статус изменён: ${formatDate(server.last_status_change)}</span>
                     </div>
                 </div>
             `;
@@ -176,43 +239,45 @@ function renderTimeline(serverIp) {
     const periodHours = { '24h': 24, '7d': 168, '30d': 720 }[currentPeriod];
     const interval = periodHours * 3600 / segments;
     let html = '';
+    let lastStatus = 'online';
     for (let i = 0; i < segments; i++) {
         const segmentStart = new Date(Date.now() - (segments - i) * interval * 1000);
         const segmentEnd = new Date(segmentStart.getTime() + interval * 1000);
-        const status = determineSegmentStatus(serverEvents, segmentStart, segmentEnd);
+        let status = 'online';
+        for (const event of serverEvents) {
+            const eventTime = new Date(event.event_time);
+            if (eventTime < segmentStart) {
+                lastStatus = event.event_type === 'offline_start' ? 'offline' : 'online';
+            } else if (eventTime >= segmentStart && eventTime < segmentEnd) {
+                if (event.event_type === 'offline_start') {
+                    status = 'offline';
+                    break;
+                } else if (event.event_type === 'offline_end' || event.event_type === 'online') {
+                    status = 'online';
+                    break;
+                }
+            }
+        }
+        if (status === 'online' && lastStatus === 'offline') status = 'offline';
         html += `<div class="server-timeline-bar ${status}" style="left: ${i * (100 / segments)}%; width: calc((100% / 24) * 0.7);"></div>`;
+        lastStatus = status;
     }
     return html;
 }
 
-function determineSegmentStatus(events, start, end) {
-    let lastStatus = 'online';
-    for (const event of events) {
-        const eventTime = new Date(event.event_time);
-        if (eventTime >= start && eventTime < end) {
-            if (event.event_type === 'offline_start') return 'offline';
-            if (event.event_type === 'online') return 'online';
-        }
-        if (eventTime < start) {
-            lastStatus = event.event_type === 'offline_start' ? 'offline' : 'online';
-        }
-    }
-    return lastStatus;
-}
-
 async function renderEvents() {
     try {
-        console.log('Rendering events, count:', eventsData.length);
+        console.log('Rendering events, count:', eventsData.length, 'limit:', eventLimit);
         const container = await waitForElement('eventsList');
         if (!eventsData.length) {
             container.innerHTML = '<div style="text-align: center; padding: 20px;">Нет событий</div>';
             return;
         }
-        container.innerHTML = eventsData.slice(0, 5).map(event => {
+        container.innerHTML = eventsData.slice(0, eventLimit).map(event => {
             const isSuccess = event.event_type === 'online' || event.event_type === 'offline_end';
             const iconClass = isSuccess ? 'success' : 'danger';
             const actionText = event.event_type === 'online' ? `Сервер ${event.server_ip} подключен` :
-                              event.event_type === 'offline_start' ? `Сервер ${event.server_ip} офлайн` :
+                              event.event_type === 'offline_start' ? `Сервер ${event.server_ip} оффлайн` :
                               `Сервер ${event.server_ip} вернулся онлайн`;
             const duration = (event.duration_seconds && event.duration_seconds > 0) ? ` (длительность: ${formatDuration(event.duration_seconds)})` : '';
             return `

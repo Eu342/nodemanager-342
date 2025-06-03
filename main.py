@@ -24,15 +24,16 @@ import asyncssh
 import subprocess
 from datetime import datetime, timedelta
 import retrying
-from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 previous_statuses = {}
 pending_retries = {}
-offline_starts = {}
+last_offline_webhook = {}
+last_check_time = {}  # Track last check time for each IP
 
 class NoCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
@@ -152,7 +153,7 @@ async def copy_json_to_xray_checker(ip, json_data):
     local_path = f"/config/outbounds/{ip}.json"
     remote_path = f"{os.getenv('XRAY_CHECKER_JSON_PATH')}/{ip}.json"
     try:
-        logger.debug(f"Creating JSON at {local_path} for {ip}")
+        logger.debug(f"Creating JSON at {local_path}")
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         with open(local_path, "w") as f:
             json.dump(json_data, f, indent=2)
@@ -223,16 +224,31 @@ async def check_ip_in_xray_checker(ip):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             async with session.get(url) as response:
                 if response.status != 200:
-                    logger.error(f"Xray Checker status: {response.status}")
-                    return False
+                    logger.error(f"Xray Checker status for {ip}: {response.status}")
+                    last_check_time[ip] = datetime.utcnow()
+                    return "unknown"
                 metrics = await response.text()
-                pattern = rf'xray_proxy_status{{[^}}]*address="{ip}:\d+"[^}}]*}} \d'
-                exists = bool(re.search(pattern, metrics))
-                logger.debug(f"IP {ip} in XrayChecker: {exists}")
-                return exists
+                logger.debug(f"Metrics for {ip}: {metrics[:1000]}")
+                status_pattern = r'xray_proxy_status{{[^}}]*address="{}:\d+"[^}}]*}} ([0-1])'.format(re.escape(ip))
+                latency_pattern = r'xray_proxy_latency_ms{{[^}}]*address="{}:\d+"[^}}]*}} (\d+)'.format(re.escape(ip))
+                status_match = re.search(status_pattern, metrics, re.MULTILINE)
+                latency_match = re.search(latency_pattern, metrics, re.MULTILINE)
+                if not status_match and not latency_match:
+                    logger.debug(f"IP {ip} not found in XrayChecker metrics")
+                    last_check_time[ip] = datetime.utcnow()
+                    return "unknown"
+                status = "unknown"
+                if status_match:
+                    status = "online" if status_match.group(1) == "1" else "offline"
+                elif latency_match:
+                    status = "online" if int(latency_match.group(1)) > 0 else "offline"
+                logger.debug(f"IP {ip} in XrayChecker: status={status}")
+                last_check_time[ip] = datetime.utcnow()
+                return status
     except Exception as e:
         logger.error(f"Error checking IP {ip}: {str(e)}\n{traceback.format_exc()}")
-        return False
+        last_check_time[ip] = datetime.utcnow()
+        return "unknown"
 
 async def update_vless_keys_from_subscription():
     try:
@@ -248,43 +264,21 @@ async def update_vless_keys_from_subscription():
         logger.error(f"Failed to update VLESS keys: {str(e)}\n{traceback.format_exc()}")
 
 async def check_server_statuses():
-    global previous_statuses, pending_retries, offline_starts
+    global previous_statuses, pending_retries, last_offline_webhook
     try:
         logger.debug("Checking server statuses")
         current_statuses = {}
         
         servers = await get_servers()
         valid_ips = {server[0] for server in servers if is_valid_ip(server[0])}
-        logger.debug(f"Valid server IPs from database: {valid_ips}")
+        logger.info(f"Valid server IPs from database: {valid_ips}")
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-            async with session.get(f"{XRAY_CHECKER_URL}/metrics") as response:
-                logger.info(f"Xray Checker /metrics status: {response.status}")
-                if response.status != 200:
-                    logger.error(f"Xray Checker status: {response.status}, reason: {response.reason}")
-                    return
-                metrics = await response.text()
-                logger.debug(f"Metrics response: {metrics[:500]}")
-                pattern = r'xray_proxy_status\{[^}]*address="([^:]+):\d+"[^}]*protocol="[^"]+"[^}]*\} (\d)'
-                for line in metrics.splitlines():
-                    match = re.match(pattern, line)
-                    if match:
-                        ip, status = match.groups()
-                        if is_valid_ip(ip) and ip in valid_ips:
-                            current_statuses[ip] = "online" if status == "1" else "offline"
-                            logger.debug(f"Parsed IP: {ip}, Status: {status}")
-                        else:
-                            logger.debug(f"Skipping IP {ip}: not in servers or invalid")
-                    else:
-                        logger.debug(f"No match for metric line: {line}")
-
-        if not current_statuses:
-            logger.warning("No statuses parsed, falling back to database")
-            for server in servers:
-                ip = server[0]
-                if is_valid_ip(ip):
-                    current_statuses[ip] = "offline"
-                    logger.debug(f"Added IP from database: {ip}, Status: offline")
+        for server in servers:
+            ip = server[0]
+            if is_valid_ip(ip):
+                status = await check_ip_in_xray_checker(ip)
+                current_statuses[ip] = status
+                logger.debug(f"IP {ip} status: {status}")
 
         if not current_statuses:
             logger.error("No server statuses available")
@@ -320,30 +314,60 @@ async def check_server_statuses():
 
         current_time = datetime.utcnow()
         tasks = []
-        for ip, status in current_statuses.items():
-            prev_status = previous_statuses.get(ip)
-            if prev_status is None or status != prev_status:
-                logger.info(f"Status change detected for {ip}: {prev_status} -> {status}")
-                webhook_payload = {
-                    "heartbeat": {"msg": "ok" if status == "online" else "fail"},
-                    "monitor": {"description": ip}
-                }
-                tasks.append((ip, webhook_payload))
+        for ip in current_statuses:
+            if ip not in valid_ips:
+                logger.debug(f"Skipping IP {ip}: not in servers")
+                continue
+            status = current_statuses[ip]
+            prev_status = previous_statuses.get(ip, None)
+            logger.info(f"Processing IP {ip}: current={status}, previous={prev_status}")
 
+            if status != prev_status or prev_status is None:
                 try:
-                    if status == "offline":
+                    if status in ["offline", "unknown"] and prev_status not in ["offline", "unknown"]:
                         await log_server_event(ip, "offline_start", duration_seconds=0)
-                        offline_starts[ip] = current_time
-                    elif status == "online" and ip in offline_starts:
-                        duration = int((current_time - offline_starts[ip]).total_seconds())
+                        logger.info(f"Logged offline_start for {ip}")
+                        webhook_payload = {
+                            "heartbeat": {"msg": "fail"},
+                            "monitor": {"description": ip}
+                        }
+                        tasks.append((ip, webhook_payload))
+                        last_offline_webhook[ip] = current_time
+                    elif status == "online" and prev_status in ["offline", "unknown"]:
+                        duration = int((current_time - last_check_time.get(ip, current_time)).total_seconds())
                         await log_server_event(ip, "offline_end", duration_seconds=duration)
+                        logger.info(f"Logged offline_end for {ip}, duration={duration}s")
+                        webhook_payload = {
+                            "heartbeat": {"msg": "ok"},
+                            "monitor": {"description": ip}
+                        }
+                        tasks.append((ip, webhook_payload))
+                        if ip in last_offline_webhook:
+                            del last_offline_webhook[ip]
+                    elif status == "online" and prev_status is None:
                         await log_server_event(ip, "online", duration_seconds=0)
-                        del offline_starts[ip]
-                    elif status == "online":
-                        await log_server_event(ip, "online", duration_seconds=0)
-                    logger.info(f"Logged event for {ip}: {status}")
+                        logger.info(f"Logged initial online for {ip}")
+                    elif status in ["offline", "unknown"] and prev_status is None:
+                        await log_server_event(ip, "offline_start", duration_seconds=0)
+                        logger.info(f"Logged initial offline_start for {ip}")
+                        webhook_payload = {
+                            "heartbeat": {"msg": "fail"},
+                            "monitor": {"description": ip}
+                        }
+                        tasks.append((ip, webhook_payload))
+                        last_offline_webhook[ip] = current_time
                 except Exception as e:
                     logger.error(f"Failed to log event for {ip}: {str(e)}\n{traceback.format_exc()}")
+
+            if status in ["offline", "unknown"] and ip in last_offline_webhook:
+                if (current_time - last_offline_webhook[ip]).total_seconds() >= 300:
+                    logger.info(f"Sending repeat offline webhook for {ip}")
+                    webhook_payload = {
+                        "heartbeat": {"msg": "fail"},
+                        "monitor": {"description": ip}
+                    }
+                    tasks.append((ip, webhook_payload))
+                    last_offline_webhook[ip] = current_time
 
         for ip, (payload, last_attempt) in list(pending_retries.items()):
             if current_time - last_attempt >= timedelta(minutes=5):
@@ -360,7 +384,6 @@ async def check_server_statuses():
                 else:
                     logger.info(f"Webhook for {ip} succeeded")
 
-        previous_statuses.clear()
         previous_statuses.update(current_statuses)
         logger.debug(f"Updated previous statuses: {current_statuses}")
     except Exception as e:
@@ -552,7 +575,7 @@ async def add_server_api(request: AddServerRequest):
                 if not key:
                     logger.error(f"Location {request.inbound_tag} not found for {ip}")
                     return {"ip": ip, "success": False, "message": f"Location {request.inbound_tag} not found"}
-                if await check_ip_in_xray_checker(ip):
+                if await check_ip_in_xray_checker(ip) != "unknown":
                     logger.debug(f"IP {ip} already in XrayChecker, forcing JSON update")
                 if not await update_xray_checker_json(ip, request.inbound_tag, key['vless_key']):
                     return {"ip": ip, "success": False, "message": "Failed to update Xray Checker JSON"}
@@ -562,7 +585,6 @@ async def add_server_api(request: AddServerRequest):
                     logger.error(f"Invalid success type from deploy_script: {success} for {ip}")
                     return {"ip": ip, "success": False, "message": f"Invalid deploy_script response: {success}"}
                 if success:
-                    # Update or insert server in database
                     conn = await asyncpg.connect(
                         database=os.getenv('LOCAL_DB_DBNAME'),
                         user=os.getenv('LOCAL_DB_USER'),
@@ -615,12 +637,11 @@ async def add_server_manual_api(request: AddServerRequest):
                 logger.error(f"Location {request.inbound_tag} not found for {ip}")
                 results.append({"ip": ip, "success": False, "message": f"Location {request.inbound_tag} not found"})
                 continue
-            if await check_ip_in_xray_checker(ip):
+            if await check_ip_in_xray_checker(ip) != "unknown":
                 logger.debug(f"IP {ip} already in XrayChecker, forcing JSON update")
             if not await update_xray_checker_json(ip, request.inbound_tag, key['vless_key']):
                 results.append({"ip": ip, "success": False, "message": "Failed to update Xray Checker JSON"})
                 continue
-            # Update or insert server in database
             conn = await asyncpg.connect(
                 database=os.getenv('LOCAL_DB_DBNAME'),
                 user=os.getenv('LOCAL_DB_USER'),
@@ -766,7 +787,7 @@ async def run_scripts_api(request: RunScriptsRequest):
                     retry_on_exception=lambda e: isinstance(e, (asyncssh.misc.ConnectionLost, asyncssh.misc.DisconnectError))
                 )
                 async def execute_deploy():
-                    return await deploy_script(ip, request.script_name)
+                    return await deploy_script(ip, script_name)
                 success, message = await execute_deploy()
                 return {"ip": ip, "success": success, "message": message}
             except Exception as e:
@@ -851,52 +872,27 @@ async def check_availability_api(ip: str):
 @app.get("/api/server_status")
 async def get_server_status():
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-            async with session.get(f"{XRAY_CHECKER_URL}/metrics") as response:
-                logger.info(f"Xray Checker /metrics status: {response.status}")
-                if response.status != 200:
-                    logger.error(f"Xray Checker returned status: {response.status}, reason: {response.reason}")
-                    return {"statuses": {}}
-                metrics = await response.text()
-                logger.debug(f"Xray Checker metrics response: {metrics[:500]}")
-        
         statuses = {}
-        pattern = r'xray_proxy_status\{[^}]*address="([^:]+):\d+"[^}]*protocol="[^"]+"[^}]*\} (\d)'
-        for line in metrics.splitlines():
-            logger.debug(f"Parsing metric line: {line}")
-            match = re.match(pattern, line)
-            if match:
-                ip, status = match.groups()
-                if is_valid_ip(ip):
-                    statuses[ip] = "online" if status == "1" else "offline"
-                    logger.debug(f"Matched IP: {ip}, Status: {status}")
-                else:
-                    logger.debug(f"Ignoring non-IP address: {ip}")
-            else:
-                logger.debug(f"No match for line: {line}")
-        
+        servers = await get_servers()
+        for server in servers:
+            ip = server[0]
+            if is_valid_ip(ip):
+                status = await check_ip_in_xray_checker(ip)
+                statuses[ip] = status
+                logger.debug(f"IP {ip} status: {status}")
         logger.info(f"Parsed statuses: {statuses}")
         return {"statuses": statuses}
     except Exception as e:
-        logger.error(f"Error fetching Xray Checker metrics: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Error fetching server status: {str(e)}\n{traceback.format_exc()}")
         return {"statuses": {}}
 
 @app.get("/api/server_events")
-async def get_server_events_api(period: str = Query('24h'), server_ip: str = Query(None), limit: int = Query(50)):
+async def get_server_events_api(period: str = Query('24h'), server_ip: str = Query(None), limit: int = Query(100)):
     try:
         period_hours = {'24h': 24, '7d': 168, '30d': 720}.get(period, 24)
         events = await get_server_events(period_hours, server_ip, limit)
         logger.info(f"Returning {len(events)} server events for period {period}")
-        formatted_events = [
-            {
-                'id': e['id'],
-                'server_ip': e['server_ip'],
-                'event_type': e['event_type'],
-                'event_time': e['event_time'],
-                'duration_seconds': e['duration_seconds'] if e['duration_seconds'] is not None else 0
-            } for e in events
-        ]
-        return {"events": formatted_events}
+        return {"events": events}
     except Exception as e:
         logger.error(f"Error fetching server events: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to fetch server events")
@@ -907,7 +903,7 @@ async def get_uptime_summary(period: str = Query('24h')):
         period_hours = {'24h': 24, '7d': 168, '30d': 720}.get(period, 24)
         servers = await get_servers()
         statuses = (await get_server_status())['statuses']
-        events = await get_server_events(period_hours, limit=50)
+        events = await get_server_events(period_hours, limit=100)
         logger.debug(f"Fetched {len(events)} events for uptime summary")
         
         summary = []
@@ -916,19 +912,60 @@ async def get_uptime_summary(period: str = Query('24h')):
             if not is_valid_ip(ip):
                 continue
             server_events = [e for e in events if e['server_ip'] == ip]
-            total_checks = len(server_events)
-            online_checks = len([e for e in server_events if e['event_type'] == 'online'])
-            uptime_percentage = (online_checks / total_checks * 100) if total_checks > 0 else 100.0
+            total_events = len([e for e in server_events if e['event_type'] in ['online', 'offline_start', 'offline_end']])
             
-            last_event = server_events[0] if server_events else None
-            last_check = last_event['event_time'] if last_event else datetime.utcnow().isoformat()
+            logger.debug(f"Processing uptime for {ip}: status={statuses.get(ip, 'unknown')}, events={len(server_events)}")
+            
+            offline_periods = []
+            offline_start = None
+            for event in sorted(server_events, key=lambda x: x['event_time']):
+                event_time = datetime.fromisoformat(event['event_time'].replace('Z', '+00:00'))
+                logger.debug(f"Event for {ip}: type={event['event_type']}, time={event_time}")
+                if event['event_type'] == 'offline_start':
+                    offline_start = event_time
+                elif event['event_type'] == 'offline_end' and offline_start:
+                    offline_periods.append((offline_start, event_time))
+                    offline_start = None
+            
+            current_status = statuses.get(ip, 'unknown')
+            last_check = last_check_time.get(ip, datetime.utcnow())
+            logger.debug(f"Last check for {ip}: {last_check}")
+            
+            if current_status in ['offline', 'unknown']:
+                start_time = offline_start if offline_start else last_check
+                if start_time > datetime.utcnow() - timedelta(hours=period_hours):
+                    offline_periods.append((start_time, datetime.utcnow()))
+                else:
+                    offline_periods.append((datetime.utcnow() - timedelta(hours=period_hours), datetime.utcnow()))
+            
+            logger.debug(f"Offline periods for {ip}: {[(start.isoformat(), end.isoformat()) for start, end in offline_periods]}")
+            
+            total_offline_seconds = sum(
+                max(0, min((end - start).total_seconds(), period_hours * 3600))
+                for start, end in offline_periods
+                if (end - start).total_seconds() > 0
+            )
+            
+            period_seconds = period_hours * 3600
+            uptime_seconds = max(0, period_seconds - total_offline_seconds)
+            uptime_percentage = min(100.0, max(0.0, (uptime_seconds / period_seconds * 100) if period_seconds > 0 else 0.0))
+            
+            last_status_change = None
+            for event in sorted(server_events, key=lambda x: x['event_time'], reverse=True):
+                if event['event_type'] in ['online', 'offline_start', 'offline_end']:
+                    last_status_change = event['event_time']
+                    break
+            if not last_status_change or current_status in ['offline', 'unknown']:
+                last_status_change = last_check.isoformat()
+            
+            logger.debug(f"Uptime for {ip}: {uptime_percentage}%, offline_seconds={total_offline_seconds}, events={total_events}")
             
             summary.append({
                 'server_ip': ip,
-                'current_status': statuses.get(ip, 'offline'),
+                'current_status': current_status,
                 'uptime_percentage': round(uptime_percentage, 1),
-                'total_checks': total_checks,
-                'last_check': last_check
+                'total_events': total_events,
+                'last_status_change': last_status_change
             })
         
         logger.info(f"Returning uptime summary for {len(summary)} servers")

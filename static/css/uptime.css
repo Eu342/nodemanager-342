@@ -100,7 +100,7 @@ body {
 .logo-icon {
     width: 36px;
     height: 36px;
-    background: linear-gradient(135deg, var(--accent) 0%, #1a8cd8 100%);
+    background: linear-gradient(135deg, var(--accent) 0%, #1a8cd8);
     border-radius: var(--radius-md);
     display: flex;
     align-items: center;
@@ -129,7 +129,7 @@ body {
     padding: 12px 16px;
     margin-bottom: 2px;
     border-radius: var(--radius-md);
-    cursor: pointer;
+    cursor: default;
     transition: var(--transition);
     color: var(--text-secondary);
     font-weight: 500;
@@ -211,7 +211,7 @@ body {
     font-weight: 800;
     color: var(--text-primary);
     letter-spacing: -0.02em;
-    background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary) 100%);
+    background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -268,6 +268,35 @@ body {
 }
 
 .period-button.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+.event-limit-selector {
+    display: flex;
+    gap: 8px;
+}
+
+.event-limit-button {
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--text-secondary);
+    transition: var(--transition);
+}
+
+.event-limit-button:hover {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+.event-limit-button.active {
     background: var(--accent);
     color: white;
     border-color: var(--accent);
@@ -368,6 +397,82 @@ body {
     color: var(--accent);
 }
 
+.controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.search-container {
+    position: relative;
+    max-width: 480px;
+    width: 100%;
+}
+
+.search-input {
+    width: 100%;
+    padding: 16px 48px 16px 20px;
+    background: var(--bg-elevated);
+    border: 2px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    font-size: 16px;
+    color: var(--text-primary);
+    transition: var(--transition);
+    font-weight: 400;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-light);
+    background: var(--bg-primary);
+}
+
+.search-input::placeholder {
+    color: var(--text-muted);
+}
+
+.search-icon {
+    position: absolute;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+.filter-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.filter-button {
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--text-secondary);
+    transition: var(--transition);
+}
+
+.filter-button:hover {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+.filter-button.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
 .servers-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -390,6 +495,14 @@ body {
 
 .server-uptime-card.offline {
     border-color: var(--danger);
+}
+
+.server-uptime-card.unknown {
+    border-color: var(--warning);
+}
+
+.server-status-indicator.unknown {
+    background: var(--warning);
 }
 
 .server-header {
@@ -449,7 +562,7 @@ body {
     position: absolute;
     top: 0;
     border-radius: var(--radius-md);
-    width: calc((100% / 24) * 0.7); /* Уменьшено на 30% */
+    width: calc((100% / 24) * 0.7);
 }
 
 .server-timeline-bar.online {
@@ -552,4 +665,24 @@ body {
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+}
+
+@media (max-width: 1024px) {
+    .sidebar { transform: translateX(-100%); }
+    .sidebar.mobile-open { transform: translateX(0); }
+    .main-content { margin-left: 0; }
+    .stats-grid { grid-template-columns: 1fr; padding: 24px; }
+    .dashboard-section, .content-header { padding-left: 24px; padding-right: 24px; }
+}
+
+@media (max-width: 640px) {
+    .page-title { font-size: 24px; }
+    .header-actions { flex-wrap: wrap; gap: 8px; }
+    .action-button { padding: 8px 12px; font-size: 13px; }
+    .stats-grid { padding: 16px; }
+    .dashboard-section, .content-header { padding-left: 16px; padding-right: 16px; }
+    .controls { flex-direction: column; align-items: flex-start; }
+    .filter-buttons { width: 100%; justify-content: space-between; }
+    .event-limit-selector { width: 100%; justify-content: flex-start; }
+    .search-container { max-width: 100%; }
 }
