@@ -5,6 +5,7 @@ import os
 import re
 import traceback
 import asyncpg
+import socket
 from contextlib import asynccontextmanager
 from typing import List
 from fastapi import FastAPI, Form, HTTPException, Query
@@ -15,6 +16,8 @@ from db import init_db, get_vless_keys, get_vless_key, update_vless_key, add_ser
 from ssh_utils import deploy_script, check_server_availability
 from config import Config
 import aiohttp
+import aio_pika
+from aio_pika.exceptions import AuthenticationError
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from subscription_utils import fetch_subscription_keys, create_outbound_json, parse_vless_key
@@ -23,7 +26,7 @@ import shutil
 import asyncssh
 import subprocess
 from datetime import datetime, timedelta
-import retrying
+from retrying import retry
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
@@ -33,7 +36,8 @@ logger = logging.getLogger(__name__)
 previous_statuses = {}
 pending_retries = {}
 last_offline_webhook = {}
-last_check_time = {}  # Track last check time for each IP
+last_check_time = {}
+rabbitmq_connection = None
 
 class NoCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
@@ -74,6 +78,108 @@ def is_valid_ip(ip: str) -> bool:
         return True
     except ValueError:
         return False
+
+async def init_rabbitmq():
+    global rabbitmq_connection
+    try:
+        rabbitmq_host = os.getenv('RABBITMQ_HOST')
+        rabbitmq_port = int(os.getenv('RABBITMQ_PORT', 5672))
+        rabbitmq_user = os.getenv('RABBITMQ_USER')
+        rabbitmq_pass = os.getenv('RABBITMQ_PASS')
+        rabbitmq_vhost = os.getenv('RABBITMQ_VHOST', '/')
+        if not all([rabbitmq_host, rabbitmq_user, rabbitmq_pass]):
+            raise ValueError("Missing RabbitMQ configuration in .env")
+        connection_url = f"amqp://{rabbitmq_user}:[REDACTED]@{rabbitmq_host}:{rabbitmq_port}{rabbitmq_vhost}"
+        logger.info(f"Attempting to connect to RabbitMQ: {connection_url}")
+        # Debug DNS resolution and socket
+        try:
+            resolved = socket.getaddrinfo(rabbitmq_host, rabbitmq_port, socket.AF_INET, socket.SOCK_STREAM)
+            logger.info(f"Resolved {rabbitmq_host}:{rabbitmq_port} to {resolved}")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((rabbitmq_host, rabbitmq_port))
+            if result == 0:
+                logger.debug(f"Socket connection to {rabbitmq_host}:{rabbitmq_port} succeeded")
+            else:
+                logger.error(f"Socket connection failed: errno {result}")
+            sock.close()
+        except socket.gaierror as e:
+            logger.error(f"DNS resolution failed for {rabbitmq_host}:{rabbitmq_port}: {str(e)}")
+            raise
+        rabbitmq_connection = await aio_pika.connect_robust(
+            f"amqp://{rabbitmq_user}:{rabbitmq_pass}@{rabbitmq_host}:{rabbitmq_port}{rabbitmq_vhost}",
+            timeout=10
+        )
+        logger.info("RabbitMQ connection established")
+        async with rabbitmq_connection.channel() as channel:
+            await channel.declare_queue('webhook_queue', durable=True)
+            logger.debug("Declared webhook_queue")
+        await start_webhook_consumer()
+    except AuthenticationError as e:
+        logger.error(f"RabbitMQ authentication failed: {str(e)}\n{traceback.format_exc()}")
+        raise
+    except aio_pika.exceptions.AMQPConnectionError as e:
+        logger.error(f"RabbitMQ connection failed: {str(e)}\n{traceback.format_exc()}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error initializing RabbitMQ: {str(e)}\n{traceback.format_exc()}")
+        raise
+
+async def publish_webhook(ip, payload):
+    try:
+        async with rabbitmq_connection.channel() as channel:
+            await channel.declare_queue('webhook_queue', durable=True)
+            message_body = json.dumps({'ip': ip, 'payload': payload})
+            await channel.default_exchange.publish(
+                aio_pika.Message(
+                    body=message_body.encode(),
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+                ),
+                routing_key='webhook_queue'
+            )
+            logger.info(f"Published webhook message for {ip}: {payload}")
+    except Exception as e:
+        logger.error(f"Failed to publish webhook for {ip}: {str(e)}\n{traceback.format_exc()}")
+
+@retry(
+    stop_max_attempt_number=3,
+    wait_fixed=5000,
+    retry_on_exception=lambda e: isinstance(e, (asyncio.TimeoutError, aiohttp.ClientError))
+)
+async def send_webhook(ip, payload):
+    webhook_url = f"http://{os.getenv('NODEMONITORING_HOST')}:{os.getenv('NODEMONITORING_PORT')}/api/kuma/alert"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with session.post(webhook_url, json=payload) as resp:
+                response_text = await resp.text()
+                logger.debug(f"Webhook response for {ip}: status={resp.status}, response={response_text}")
+                if resp.status != 200:
+                    logger.error(f"Webhook failed for {ip}: status={resp.status}")
+                    return False
+                logger.info(f"Webhook sent for {ip}: {payload}")
+                return True
+    except Exception as e:
+        logger.error(f"Webhook error for {ip}: {str(e)}\n{traceback.format_exc()}")
+        raise
+
+async def webhook_consumer():
+    async with rabbitmq_connection.channel() as channel:
+        queue = await channel.declare_queue('webhook_queue', durable=True)
+        async for message in queue:
+            async with message.process():
+                try:
+                    data = json.loads(message.body.decode())
+                    ip = data['ip']
+                    payload = data['payload']
+                    success = await send_webhook(ip, payload)
+                    if not success:
+                        logger.warning(f"Webhook failed for {ip}, will retry")
+                except Exception as e:
+                    logger.error(f"Error processing webhook message: {str(e)}\n{traceback.format_exc()}")
+
+async def start_webhook_consumer():
+    asyncio.create_task(webhook_consumer())
+    logger.info("Started RabbitMQ webhook consumer")
 
 async def remove_existing_json(ip):
     remote_path = f"{os.getenv('XRAY_CHECKER_JSON_PATH')}/{ip}.json"
@@ -287,31 +393,6 @@ async def check_server_statuses():
         logger.debug(f"Current statuses: {current_statuses}")
         logger.debug(f"Previous statuses: {previous_statuses}")
 
-        webhook_url = f"http://{os.getenv('NODEMONITORING_HOST')}:{os.getenv('NODEMONITORING_PORT')}/api/kuma/alert"
-        logger.info(f"Preparing to send webhook to: {webhook_url}")
-
-        semaphore = asyncio.Semaphore(1)
-        @retrying.retry(
-            stop_max_attempt_number=3,
-            wait_fixed=5000,
-            retry_on_exception=lambda e: isinstance(e, (asyncio.TimeoutError, aiohttp.ClientError))
-        )
-        async def send_webhook(ip, payload):
-            async with semaphore:
-                try:
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                        async with session.post(webhook_url, json=payload) as resp:
-                            response_text = await resp.text()
-                            logger.debug(f"Webhook response for {ip}: status={resp.status}, response={response_text}")
-                            if resp.status != 200:
-                                logger.error(f"Webhook failed for {ip}: status={resp.status}")
-                                return False
-                            logger.info(f"Webhook sent for {ip}: {payload}")
-                            return True
-                except Exception as e:
-                    logger.error(f"Webhook error for {ip}: {str(e)}\n{traceback.format_exc()}")
-                    raise
-
         current_time = datetime.utcnow()
         tasks = []
         for ip in current_statuses:
@@ -331,7 +412,7 @@ async def check_server_statuses():
                             "heartbeat": {"msg": "fail"},
                             "monitor": {"description": ip}
                         }
-                        tasks.append((ip, webhook_payload))
+                        await publish_webhook(ip, webhook_payload)
                         last_offline_webhook[ip] = current_time
                     elif status == "online" and prev_status in ["offline", "unknown"]:
                         duration = int((current_time - last_check_time.get(ip, current_time)).total_seconds())
@@ -341,7 +422,7 @@ async def check_server_statuses():
                             "heartbeat": {"msg": "ok"},
                             "monitor": {"description": ip}
                         }
-                        tasks.append((ip, webhook_payload))
+                        await publish_webhook(ip, webhook_payload)
                         if ip in last_offline_webhook:
                             del last_offline_webhook[ip]
                     elif status == "online" and prev_status is None:
@@ -354,35 +435,26 @@ async def check_server_statuses():
                             "heartbeat": {"msg": "fail"},
                             "monitor": {"description": ip}
                         }
-                        tasks.append((ip, webhook_payload))
+                        await publish_webhook(ip, webhook_payload)
                         last_offline_webhook[ip] = current_time
                 except Exception as e:
                     logger.error(f"Failed to log event for {ip}: {str(e)}\n{traceback.format_exc()}")
 
             if status in ["offline", "unknown"] and ip in last_offline_webhook:
                 if (current_time - last_offline_webhook[ip]).total_seconds() >= 300:
-                    logger.info(f"Sending repeat offline webhook for {ip}")
+                    logger.info(f"Publishing repeat offline webhook for {ip}")
                     webhook_payload = {
                         "heartbeat": {"msg": "fail"},
                         "monitor": {"description": ip}
                     }
-                    tasks.append((ip, webhook_payload))
+                    await publish_webhook(ip, webhook_payload)
                     last_offline_webhook[ip] = current_time
 
         for ip, (payload, last_attempt) in list(pending_retries.items()):
             if current_time - last_attempt >= timedelta(minutes=5):
                 logger.info(f"Retrying webhook for {ip}")
-                tasks.append((ip, payload))
+                await publish_webhook(ip, payload)
                 del pending_retries[ip]
-
-        if tasks:
-            results = await asyncio.gather(*(send_webhook(ip, payload) for ip, payload in tasks), return_exceptions=True)
-            for (ip, payload), result in zip(tasks, results):
-                if isinstance(result, Exception) or result is False:
-                    pending_retries[ip] = (payload, current_time)
-                    logger.error(f"Webhook for {ip} failed, retry in 5 min")
-                else:
-                    logger.info(f"Webhook for {ip} succeeded")
 
         previous_statuses.update(current_statuses)
         logger.debug(f"Updated previous statuses: {current_statuses}")
@@ -395,14 +467,18 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app: FastAPI):
     try:
         await init_db()
-        logger.info("Database initialized")
+        await init_rabbitmq()
+        logger.info("Database and RabbitMQ initialized")
         scheduler.add_job(update_vless_keys_from_subscription, 'interval', hours=int(os.getenv('SUBSCRIPTION_REFRESH_HOURS', 1)))
         scheduler.add_job(check_server_statuses, 'interval', minutes=1)
         scheduler.start()
     except Exception as e:
-        logger.error(f"Failed to initialize database: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Failed to initialize: {str(e)}\n{traceback.format_exc()}")
         raise
     yield
+    if rabbitmq_connection:
+        await rabbitmq_connection.close()
+        logger.info("RabbitMQ connection closed")
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
@@ -744,14 +820,7 @@ async def reboot_servers_api(request: RebootRequest):
         async with semaphore:
             logger.info(f"Attempting to reboot server {ip} with script {script_name}")
             try:
-                @retrying.retry(
-                    stop_max_attempt_number=3,
-                    wait_fixed=2000,
-                    retry_on_exception=lambda e: isinstance(e, (asyncssh.misc.ConnectionLost, asyncssh.misc.DisconnectError))
-                )
-                async def execute_deploy():
-                    return await deploy_script(ip, script_name)
-                success, message = await execute_deploy()
+                success, message = await deploy_script(ip, script_name)
                 return {"ip": ip, "success": success, "message": message}
             except Exception as e:
                 logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
@@ -781,14 +850,7 @@ async def run_scripts_api(request: RunScriptsRequest):
         async with semaphore:
             logger.info(f"Attempting to run script {request.script_name} on {ip}")
             try:
-                @retrying.retry(
-                    stop_max_attempt_number=3,
-                    wait_fixed=2000,
-                    retry_on_exception=lambda e: isinstance(e, (asyncssh.misc.ConnectionLost, asyncssh.misc.DisconnectError))
-                )
-                async def execute_deploy():
-                    return await deploy_script(ip, script_name)
-                success, message = await execute_deploy()
+                success, message = await deploy_script(ip, request.script_name)
                 return {"ip": ip, "success": success, "message": message}
             except Exception as e:
                 logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
