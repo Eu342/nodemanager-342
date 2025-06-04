@@ -37,6 +37,7 @@ previous_statuses = {}
 pending_retries = {}
 last_offline_webhook = {}
 last_check_time = {}
+last_status_change_time = {}
 rabbitmq_connection = None
 
 class NoCacheMiddleware(BaseHTTPMiddleware):
@@ -79,6 +80,45 @@ def is_valid_ip(ip: str) -> bool:
     except ValueError:
         return False
 
+def get_minute_accusative_form(minutes: int) -> str:
+    if minutes % 10 == 1 and minutes % 100 != 11:
+        return "минуту"
+    elif minutes % 10 in [2, 3, 4] and minutes % 100 not in [12, 13, 14]:
+        return "минуты"
+    else:
+        return "минут"
+
+async def send_telegram_alert(ip: str, status: str, duration_minutes: int):
+    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    chat_id = os.getenv('TELEGRAM_CHAT_ID')
+    if not bot_token or not chat_id:
+        logger.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env")
+        return
+    # HTML с <code> для копирования IP
+    minute_form = get_minute_accusative_form(duration_minutes)
+    if status == "offline":
+        message = f'<b>[<code>{ip}</code>: 🔴 Офлайн]</b> - была доступна {duration_minutes} {minute_form}'
+    else:
+        message = f'<b>[<code>{ip}</code>: ✅ Онлайн]</b> - была недоступна {duration_minutes} {minute_form}'
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    logger.debug(f"Sending Telegram alert for {ip}: message={message}, url={url}, payload={payload}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload) as resp:
+                response_text = await resp.text()
+                logger.debug(f"Telegram response for {ip}: status={resp.status}, response={response_text}")
+                if resp.status != 200:
+                    logger.error(f"Failed to send Telegram alert for {ip}: status={resp.status}, response={response_text}")
+                else:
+                    logger.info(f"Telegram alert sent for {ip}: {message}")
+    except Exception as e:
+        logger.error(f"Error sending Telegram alert for {ip}: {str(e)}\n{traceback.format_exc()}")
+
 async def init_rabbitmq():
     global rabbitmq_connection
     try:
@@ -91,7 +131,6 @@ async def init_rabbitmq():
             raise ValueError("Missing RabbitMQ configuration in .env")
         connection_url = f"amqp://{rabbitmq_user}:[REDACTED]@{rabbitmq_host}:{rabbitmq_port}{rabbitmq_vhost}"
         logger.info(f"Attempting to connect to RabbitMQ: {connection_url}")
-        # Debug DNS resolution and socket
         try:
             resolved = socket.getaddrinfo(rabbitmq_host, rabbitmq_port, socket.AF_INET, socket.SOCK_STREAM)
             logger.info(f"Resolved {rabbitmq_host}:{rabbitmq_port} to {resolved}")
@@ -370,7 +409,7 @@ async def update_vless_keys_from_subscription():
         logger.error(f"Failed to update VLESS keys: {str(e)}\n{traceback.format_exc()}")
 
 async def check_server_statuses():
-    global previous_statuses, pending_retries, last_offline_webhook
+    global previous_statuses, pending_retries, last_offline_webhook, last_status_change_time
     try:
         logger.debug("Checking server statuses")
         current_statuses = {}
@@ -405,6 +444,15 @@ async def check_server_statuses():
 
             if status != prev_status or prev_status is None:
                 try:
+                    duration_minutes = 0
+                    if ip in last_status_change_time:
+                        duration = (current_time - last_status_change_time[ip]).total_seconds()
+                        duration_minutes = int(duration // 60)
+                        logger.debug(f"Calculated duration for {ip}: {duration_minutes} minutes")
+                    else:
+                        duration_minutes = 0
+                        logger.debug(f"No previous status change for {ip}, duration set to 0")
+
                     if status in ["offline", "unknown"] and prev_status not in ["offline", "unknown"]:
                         await log_server_event(ip, "offline_start", duration_seconds=0)
                         logger.info(f"Logged offline_start for {ip}")
@@ -413,9 +461,12 @@ async def check_server_statuses():
                             "monitor": {"description": ip}
                         }
                         await publish_webhook(ip, webhook_payload)
+                        logger.debug(f"Attempting to send Telegram alert for {ip}: offline, duration={duration_minutes}")
+                        await send_telegram_alert(ip, "offline", duration_minutes)
                         last_offline_webhook[ip] = current_time
+                        last_status_change_time[ip] = current_time
                     elif status == "online" and prev_status in ["offline", "unknown"]:
-                        duration = int((current_time - last_check_time.get(ip, current_time)).total_seconds())
+                        duration = int((current_time - last_status_change_time.get(ip, current_time)).total_seconds())
                         await log_server_event(ip, "offline_end", duration_seconds=duration)
                         logger.info(f"Logged offline_end for {ip}, duration={duration}s")
                         webhook_payload = {
@@ -423,11 +474,15 @@ async def check_server_statuses():
                             "monitor": {"description": ip}
                         }
                         await publish_webhook(ip, webhook_payload)
+                        logger.debug(f"Attempting to send Telegram alert for {ip}: online, duration={duration_minutes}")
+                        await send_telegram_alert(ip, "online", duration_minutes)
                         if ip in last_offline_webhook:
                             del last_offline_webhook[ip]
+                        last_status_change_time[ip] = current_time
                     elif status == "online" and prev_status is None:
                         await log_server_event(ip, "online", duration_seconds=0)
                         logger.info(f"Logged initial online for {ip}")
+                        last_status_change_time[ip] = current_time
                     elif status in ["offline", "unknown"] and prev_status is None:
                         await log_server_event(ip, "offline_start", duration_seconds=0)
                         logger.info(f"Logged initial offline_start for {ip}")
@@ -436,24 +491,33 @@ async def check_server_statuses():
                             "monitor": {"description": ip}
                         }
                         await publish_webhook(ip, webhook_payload)
+                        logger.debug(f"Attempting to send Telegram alert for {ip}: offline, duration={duration_minutes}")
+                        await send_telegram_alert(ip, "offline", duration_minutes)
                         last_offline_webhook[ip] = current_time
+                        last_status_change_time[ip] = current_time
                 except Exception as e:
                     logger.error(f"Failed to log event for {ip}: {str(e)}\n{traceback.format_exc()}")
 
             if status in ["offline", "unknown"] and ip in last_offline_webhook:
                 if (current_time - last_offline_webhook[ip]).total_seconds() >= 300:
                     logger.info(f"Publishing repeat offline webhook for {ip}")
+                    duration_minutes = int((current_time - last_status_change_time.get(ip, current_time)).total_seconds() // 60)
                     webhook_payload = {
                         "heartbeat": {"msg": "fail"},
                         "monitor": {"description": ip}
                     }
                     await publish_webhook(ip, webhook_payload)
+                    logger.debug(f"Attempting to send Telegram alert for {ip}: offline (repeat), duration={duration_minutes}")
+                    await send_telegram_alert(ip, "offline", duration_minutes)
                     last_offline_webhook[ip] = current_time
 
         for ip, (payload, last_attempt) in list(pending_retries.items()):
             if current_time - last_attempt >= timedelta(minutes=5):
                 logger.info(f"Retrying webhook for {ip}")
+                duration_minutes = int((current_time - last_status_change_time.get(ip, current_time)).total_seconds() // 60)
                 await publish_webhook(ip, payload)
+                logger.debug(f"Attempting to send Telegram alert for {ip}: {'offline' if payload['heartbeat']['msg'] == 'fail' else 'online'} (retry), duration={duration_minutes}")
+                await send_telegram_alert(ip, "offline" if payload["heartbeat"]["msg"] == "fail" else "online", duration_minutes)
                 del pending_retries[ip]
 
         previous_statuses.update(current_statuses)
@@ -699,7 +763,7 @@ async def add_server_manual_api(request: AddServerRequest):
         for ip in request.ips:
             if not is_valid_ip(ip):
                 logger.error(f"Invalid IP address: {ip}")
-                raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}")
+                raise HTTPException(status_code=400, detail="Invalid IP address")
     except ValueError:
         logger.error(f"Invalid IP address in {request.ips}\n{traceback.format_exc()}")
         raise HTTPException(status_code=400, detail="Invalid IP address")
@@ -981,11 +1045,11 @@ async def get_uptime_summary(period: str = Query('24h')):
             offline_periods = []
             offline_start = None
             for event in sorted(server_events, key=lambda x: x['event_time']):
-                event_time = datetime.fromisoformat(event['event_time'].replace('Z', '+00:00'))
-                logger.debug(f"Event for {ip}: type={event['event_type']}, time={event_time}")
-                if event['event_type'] == 'offline_start':
+                event_time = datetime.fromisoformat(x['event_time'].replace('Z', '+00:00'))
+                logger.debug(f"Event for {ip}: type={x['event_type']}, time={event_time}")
+                if x['event_type'] == 'offline_start':
                     offline_start = event_time
-                elif event['event_type'] == 'offline_end' and offline_start:
+                elif x['event_type'] == 'offline_end' and offline_start:
                     offline_periods.append((offline_start, event_time))
                     offline_start = None
             
@@ -1014,8 +1078,8 @@ async def get_uptime_summary(period: str = Query('24h')):
             
             last_status_change = None
             for event in sorted(server_events, key=lambda x: x['event_time'], reverse=True):
-                if event['event_type'] in ['online', 'offline_start', 'offline_end']:
-                    last_status_change = event['event_time']
+                if x['event_type'] in ['online', 'offline_start', 'offline_end']:
+                    last_status_change = x['event_time']
                     break
             if not last_status_change or current_status in ['offline', 'unknown']:
                 last_status_change = last_check.isoformat()
