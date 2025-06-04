@@ -1045,11 +1045,11 @@ async def get_uptime_summary(period: str = Query('24h')):
             offline_periods = []
             offline_start = None
             for event in sorted(server_events, key=lambda x: x['event_time']):
-                event_time = datetime.fromisoformat(x['event_time'].replace('Z', '+00:00'))
-                logger.debug(f"Event for {ip}: type={x['event_type']}, time={event_time}")
-                if x['event_type'] == 'offline_start':
+                event_time = datetime.fromisoformat(event['event_time'].replace('Z', '+00:00'))
+                logger.debug(f"Event for {ip}: type={event['event_type']}, time={event_time}")
+                if event['event_type'] == 'offline_start':
                     offline_start = event_time
-                elif x['event_type'] == 'offline_end' and offline_start:
+                elif event['event_type'] == 'offline_end' and offline_start:
                     offline_periods.append((offline_start, event_time))
                     offline_start = None
             
@@ -1078,8 +1078,8 @@ async def get_uptime_summary(period: str = Query('24h')):
             
             last_status_change = None
             for event in sorted(server_events, key=lambda x: x['event_time'], reverse=True):
-                if x['event_type'] in ['online', 'offline_start', 'offline_end']:
-                    last_status_change = x['event_time']
+                if event['event_type'] in ['online', 'offline_start', 'offline_end']:
+                    last_status_change = event['event_time']
                     break
             if not last_status_change or current_status in ['offline', 'unknown']:
                 last_status_change = last_check.isoformat()
