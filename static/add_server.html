@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Добавить сервер - NodeManager</title>
+    <link rel="stylesheet" href="/static/css/add_server.css">
+</head>
+<body>
+    <div class="app">
+        <div class="mobile-overlay" id="mobileOverlay"></div>
+
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">N</div>
+                    <div class="logo-text">NodeManager</div>
+                </div>
+            </div>
+            <div class="nav-section">
+                <div class="nav-group">
+                    <div class="nav-group-title">Overview</div>
+                    <a href="/nodemanager" class="nav-item" data-page="dashboard">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <rect x="3" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="14" width="7" height="7"></rect>
+                            <rect x="3" y="14" width="7" height="7"></rect>
+                        </svg>
+                        <span>Главная</span>
+                    </a>
+                    <a href="/nodemanager/uptime" class="nav-item" data-page="uptime">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M18 20V10m-6 10V4M6 20V14"></path>
+                        </svg>
+                        <span>Аптайм</span>
+                    </a>
+                </div>
+                <div class="nav-group">
+                    <div class="nav-group-title">Management</div>
+                    <a href="/nodemanager/list" class="nav-item" data-page="list">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <line x1="8" y1="6" x2="21" y2="6"></line>
+                            <line x1="8" y1="12" x2="21" y2="12"></line>
+                            <line x1="8" y1="18" x2="21" y2="18"></line>
+                            <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                            <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                            <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                        </svg>
+                        <span>Список серверов</span>
+                    </a>
+                    <a href="/nodemanager/add" class="nav-item active" data-page="add">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="16"></line>
+                            <line x1="8" y1="12" x2="16" y2="12"></line>
+                        </svg>
+                        <span>Добавить сервер</span>
+                    </a>
+                    <a href="/nodemanager/setup" class="nav-item" data-page="install">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                           <path d="M8 17l4 4 4-4M12 12v9"></path>
+                           <path d="M20.88 18.09A5 5 0 0018 9h-1.26A8 8 0 103 16.29"></path>
+                        </svg>
+                        <span>Настроить сервер</span>
+                    </a>
+                </div>
+                <div class="nav-group">
+                    <div class="nav-group-title">System</div>
+                    <a href="/nodemanager/settings/subscription" class="nav-item" data-page="settings">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"></path>
+                        </svg>
+                        <span>Настройки</span>
+                    </a>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main">
+            <header class="header">
+                <div class="header-content">
+                    <div class="header-left">
+                        <div>
+                            <h1 class="page-title">Добавить сервер</h1>
+                            <p class="page-subtitle">Добавьте уже настроенный сервер</p>
+                        </div>
+                    </div>
+                    <div class="header-actions">
+                        <button class="action-button" onclick="history.back()">
+                            <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                            </svg>
+                            <span>Назад</span>
+                        </button>
+                        <button class="action-button" id="themeButton">
+                            <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <button class="mobile-menu-toggle" id="mobileMenuToggle">
+                <svg style="width: 20px; height: 20px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                </svg>
+            </button>
+
+            <div class="content">
+                <section class="form-section">
+                    <div class="form-container">
+                        <div class="form-card">
+                            <div id="alert" class="alert" style="display: none;"></div>
+                            <form id="addServerForm">
+                                <div class="form-field">
+                                    <label class="field-label" for="inbound">Локация</label>
+                                    <div class="field-description">Выберите тип конфигурации для всех добавляемых серверов</div>
+                                    <select class="form-select" id="inbound" name="inbound" required>
+                                        <option value="">Загрузка локаций...</option>
+                                    </select>
+                                </div>
+                                <div class="form-field">
+                                    <label class="field-label">IP адреса серверов</label>
+                                    <div class="field-description">Введите IP адреса через запятую, пробел или Enter</div>
+                                    <div class="ip-tags-input" id="ipTagsInputContainer">
+                                        <input type="text" class="ip-input" id="ipAddressInput" placeholder="Введите IP и нажмите Enter...">
+                                    </div>
+                                    <div class="ip-counter">
+                                        <div class="counter-item">
+                                            <span class="counter-dot"></span>
+                                            <span>Всего IP: <strong id="ipCount">0</strong></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="submit-section">
+                                    <button type="submit" class="submit-button" id="submitAddServerButton" disabled>
+                                        <div class="button-content">
+                                            <span id="submitButtonText">Добавить серверы</span>
+                                        </div>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/static/js/add_server.js"></script>
+</body>
+</html>
