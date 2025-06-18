@@ -17,13 +17,29 @@ MIN_CHECK_INTERVAL = timedelta(minutes=5)
 async def get_zone_id(domain: str) -> str:
     """Получает zone_id для домена через Cloudflare API."""
     try:
+        # Проверяем наличие токена
+        cf_token = os.getenv('CLOUDFLARE_API_TOKEN')
+        if not cf_token:
+            logger.error("CLOUDFLARE_API_TOKEN not set in environment")
+            raise ValueError("CLOUDFLARE_API_TOKEN not configured")
+        
+        # Очищаем токен от лишних пробелов и символов
+        cf_token = cf_token.strip()
+        if cf_token.startswith('"') and cf_token.endswith('"'):
+            cf_token = cf_token[1:-1]
+        elif cf_token.startswith("'") and cf_token.endswith("'"):
+            cf_token = cf_token[1:-1]
+        
         # Извлекаем базовый домен (например, unfence.nl из n.unfence.nl)
         base_domain = '.'.join(domain.split('.')[-2:])
         url = "https://api.cloudflare.com/client/v4/zones"
         headers = {
-            "Authorization": f"Bearer {os.getenv('CLOUDFLARE_API_TOKEN')}",
+            "Authorization": f"Bearer {cf_token}",
             "Content-Type": "application/json"
         }
+        
+        logger.debug(f"Getting zone_id for domain {base_domain}")
+        
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             async with session.get(url, headers=headers) as resp:
                 result = await resp.json()
@@ -74,6 +90,19 @@ async def create_dns_record(ip: str, inbound_letter: str, ttl: int, domain: str)
     """Создаёт DNS-запись d<inbound_letter> для IP в зоне домена с защитой от дубликатов."""
     logger.debug(f"Creating DNS record: inbound_letter={inbound_letter}, domain={domain}, ip={ip}, ttl={ttl}")
     
+    # Проверяем наличие токена
+    cf_token = os.getenv('CLOUDFLARE_API_TOKEN')
+    if not cf_token:
+        logger.error("CLOUDFLARE_API_TOKEN not set in environment")
+        raise ValueError("CLOUDFLARE_API_TOKEN not configured")
+    
+    # Очищаем токен от лишних пробелов и символов
+    cf_token = cf_token.strip()
+    if cf_token.startswith('"') and cf_token.endswith('"'):
+        cf_token = cf_token[1:-1]
+    elif cf_token.startswith("'") and cf_token.endswith("'"):
+        cf_token = cf_token[1:-1]
+    
     # Check if we should create this record
     if not await should_create_dns_record(ip, domain, inbound_letter):
         logger.info(f"Skipping DNS record creation for {ip} (already exists or rate limited)")
@@ -90,7 +119,7 @@ async def create_dns_record(ip: str, inbound_letter: str, ttl: int, domain: str)
         zone_id = await get_zone_id(domain)
         url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records"
         headers = {
-            "Authorization": f"Bearer {os.getenv('CLOUDFLARE_API_TOKEN')}",
+            "Authorization": f"Bearer {cf_token}",
             "Content-Type": "application/json"
         }
         payload = {
@@ -132,9 +161,22 @@ async def create_dns_record(ip: str, inbound_letter: str, ttl: int, domain: str)
 async def find_dns_record(ip: str, domain: str) -> Optional[dict]:
     """Ищет DNS-запись для IP в зоне домена."""
     try:
+        # Проверяем наличие токена
+        cf_token = os.getenv('CLOUDFLARE_API_TOKEN')
+        if not cf_token:
+            logger.error("CLOUDFLARE_API_TOKEN not set in environment")
+            return None
+        
+        # Очищаем токен от лишних пробелов и символов
+        cf_token = cf_token.strip()
+        if cf_token.startswith('"') and cf_token.endswith('"'):
+            cf_token = cf_token[1:-1]
+        elif cf_token.startswith("'") and cf_token.endswith("'"):
+            cf_token = cf_token[1:-1]
+        
         zone_id = await get_zone_id(domain)
         url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records?type=A&content={ip}"
-        headers = {"Authorization": f"Bearer {os.getenv('CLOUDFLARE_API_TOKEN')}"}
+        headers = {"Authorization": f"Bearer {cf_token}"}
         
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             async with session.get(url, headers=headers) as resp:
@@ -151,9 +193,22 @@ async def find_dns_record(ip: str, domain: str) -> Optional[dict]:
 async def delete_dns_record(record_id: str, domain: str) -> bool:
     """Удаляет DNS-запись по ID в зоне домена."""
     try:
+        # Проверяем наличие токена
+        cf_token = os.getenv('CLOUDFLARE_API_TOKEN')
+        if not cf_token:
+            logger.error("CLOUDFLARE_API_TOKEN not set in environment")
+            return False
+        
+        # Очищаем токен от лишних пробелов и символов
+        cf_token = cf_token.strip()
+        if cf_token.startswith('"') and cf_token.endswith('"'):
+            cf_token = cf_token[1:-1]
+        elif cf_token.startswith("'") and cf_token.endswith("'"):
+            cf_token = cf_token[1:-1]
+        
         zone_id = await get_zone_id(domain)
         url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records/{record_id}"
-        headers = {"Authorization": f"Bearer {os.getenv('CLOUDFLARE_API_TOKEN')}"}
+        headers = {"Authorization": f"Bearer {cf_token}"}
         
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             async with session.delete(url, headers=headers) as resp:

@@ -139,7 +139,7 @@ async def init_auth_db(pool: asyncpg.Pool):
             )
             
             if not admin_exists:
-                default_password = os.getenv('DEFAULT_ADMIN_PASSWORD', secrets.token_urlsafe(16))
+                default_password = os.getenv('DEFAULT_ADMIN_PASSWORD', 'Admin123!')
                 await conn.execute(
                     '''
                     INSERT INTO users (username, password_hash, is_admin)
