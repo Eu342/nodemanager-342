@@ -2,7 +2,6 @@ fastapi==0.115.0
 uvicorn==0.32.0
 sqlalchemy==2.0.35
 asyncpg==0.30.0
-<<<<<<< HEAD
 asyncssh==2.17.0
 paramiko==3.5.0
 python-dotenv==1.0.1
@@ -13,8 +12,3 @@ apscheduler==3.10.4
 retrying==1.3.4
 aio-pika==9.4.2
 aiogram==3.13.1
-=======
-paramiko==3.5.0
-python-dotenv==1.0.1
-python-multipart==0.0.12
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
