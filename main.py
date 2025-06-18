@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import asyncio
 import ipaddress
 import logging
@@ -9,13 +8,10 @@ import asyncpg
 import socket
 from contextlib import asynccontextmanager
 from typing import List
-=======
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
 from fastapi import FastAPI, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-<<<<<<< HEAD
 from db import init_db, get_vless_keys, get_vless_key, update_vless_key, add_server, get_servers, delete_server, log_server_event, get_server_events
 from ssh_utils import deploy_script, check_server_availability
 from config import Config
@@ -637,47 +633,6 @@ app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
 load_dotenv()
 XRAY_CHECKER_URL = f"http://{os.getenv('XRAY_CHECKER_HOST')}:{os.getenv('XRAY_CHECKER_PORT')}"
-=======
-import ipaddress
-import asyncio
-from db import get_remote_inbounds, add_server, get_servers, init_db, delete_server
-from ssh_utils import deploy_script
-from contextlib import asynccontextmanager
-import re
-import logging
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Инициализация при старте приложения."""
-    try:
-        await init_db()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        raise
-    yield
-
-app = FastAPI(lifespan=lifespan)
-
-# Монтируем папку static
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-class ServerForm(BaseModel):
-    ip: str
-    inbound: str
-
-def get_script_name(inbound_tag: str) -> str:
-    """
-    Генерирует имя .sh скрипта из inbound тега.
-    Например: "USA VLESS TCP" → "usa_vless_tcp.sh", "RU VLESS TCP 3" → "ru_vless_tcp_3.sh"
-    """
-    safe_tag = re.sub(r'[^a-zA-Z0-9\s]', '', inbound_tag)
-    script_name = safe_tag.lower().replace(" ", "_") + ".sh"
-    return script_name
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
 
 @app.get("/nodemanager", response_class=HTMLResponse)
 async def index():
@@ -686,11 +641,7 @@ async def index():
             logger.info("Serving index.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
-<<<<<<< HEAD
         logger.error(f"Error serving index.html: {str(e)}\n{traceback.format_exc()}")
-=======
-        logger.error(f"Error serving index.html: {e}")
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/add", response_class=HTMLResponse)
@@ -700,11 +651,7 @@ async def add_server_page():
             logger.info("Serving add_server.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
-<<<<<<< HEAD
         logger.error(f"Error serving add_server.html: {str(e)}\n{traceback.format_exc()}")
-=======
-        logger.error(f"Error serving add_server.html: {e}")
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/setup", response_class=HTMLResponse)
@@ -714,11 +661,7 @@ async def setup_server_page():
             logger.info("Serving setup_server.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
-<<<<<<< HEAD
         logger.error(f"Error serving setup_server.html: {str(e)}\n{traceback.format_exc()}")
-=======
-        logger.error(f"Error serving setup_server.html: {e}")
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/list", response_class=HTMLResponse)
@@ -728,7 +671,6 @@ async def server_list_page():
             logger.info("Serving server_list.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
-<<<<<<< HEAD
         logger.error(f"Error serving server_list.html: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -963,62 +905,6 @@ async def add_server_manual_api(request: AddServerRequest):
     response = {"results": results}
     logger.info(f"Manual server addition completed: {response}")
     return response
-=======
-        logger.error(f"Error serving server_list.html: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.get("/api/inbounds")
-async def get_inbounds():
-    try:
-        inbounds = await get_remote_inbounds()
-        if not inbounds:
-            logger.warning("No inbounds returned from database")
-            return {"inbounds": []}
-        logger.info(f"Returning {len(inbounds)} inbounds")
-        return {"inbounds": inbounds}
-    except Exception as e:
-        logger.error(f"Failed to fetch inbounds: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch inbounds")
-
-@app.post("/api/add_server")
-async def add_server_api(ip: str = Form(...), inbound: str = Form(...)):
-    try:
-        ipaddress.ip_address(ip)
-    except ValueError:
-        logger.error(f"Invalid IP address: {ip}")
-        raise HTTPException(status_code=400, detail="Invalid IP address")
-
-    script_name = get_script_name(inbound)
-    logger.info(f"Generated script name: {script_name} for inbound: {inbound}")
-
-    loop = asyncio.get_event_loop()
-    success, message = await loop.run_in_executor(None, deploy_script, ip, script_name)
-    if not success:
-        logger.error(f"Failed to deploy script {script_name} on {ip}: {message}")
-        raise HTTPException(status_code=500, detail=f"Failed to deploy script: {message}")
-
-    if not await add_server(ip, inbound):
-        logger.error(f"Failed to save server {ip} with inbound {inbound} to database")
-        raise HTTPException(status_code=500, detail="Failed to save server to database")
-
-    logger.info(f"Server {ip} added successfully with inbound {inbound}")
-    return {"message": "Server added successfully"}
-
-@app.post("/api/add_server_manual")
-async def add_server_manual_api(ip: str = Form(...), inbound: str = Form(...)):
-    try:
-        ipaddress.ip_address(ip)
-    except ValueError:
-        logger.error(f"Invalid IP address: {ip}")
-        raise HTTPException(status_code=400, detail="Invalid IP address")
-
-    if not await add_server(ip, inbound):
-        logger.error(f"Failed to save server {ip} with inbound {inbound} to database")
-        raise HTTPException(status_code=500, detail="Failed to save server to database")
-
-    logger.info(f"Server {ip} added manually with inbound {inbound}")
-    return {"message": "Server added successfully"}
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
 
 @app.get("/api/servers")
 async def get_servers_api():
@@ -1027,29 +913,18 @@ async def get_servers_api():
         formatted_servers = [
             {
                 'ip': s[0],
-<<<<<<< HEAD
                 'inbound_tag': s[1],
                 'install_date': s[2].isoformat() if s[2] else None
             } for s in servers if is_valid_ip(s[0])
-=======
-                'inbound': s[1],
-                'install_date': s[2].isoformat() if s[2] else None
-            } for s in servers
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
         ]
         logger.info(f"Returning {len(formatted_servers)} servers")
         return {"servers": formatted_servers}
     except Exception as e:
-<<<<<<< HEAD
         logger.error(f"Failed to fetch servers: {str(e)}\n{traceback.format_exc()}")
-=======
-        logger.error(f"Failed to fetch servers: {e}")
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
         raise HTTPException(status_code=500, detail="Failed to fetch servers")
 
 @app.delete("/api/delete_server")
 async def delete_server_api(ip: str = Query(...)):
-<<<<<<< HEAD
     logger.debug(f"Received DELETE /api/delete_server request for IP: {ip}")
     try:
         ipaddress.ip_address(ip)
@@ -1071,19 +946,10 @@ async def delete_server_api(ip: str = Query(...)):
         key_data = parse_vless_key(key['vless_key'])
         inbound_letter = key_data.get('inbound_letter')
 
-=======
-    try:
-        ipaddress.ip_address(ip)
-    except ValueError:
-        logger.error(f"Invalid IP address for deletion: {ip}")
-        raise HTTPException(status_code=400, detail="Invalid IP address")
-
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
     if not await delete_server(ip):
         logger.error(f"Failed to delete server {ip}: not found in database")
         raise HTTPException(status_code=404, detail="Server not found")
 
-<<<<<<< HEAD
     try:
         if domain and inbound_letter:
             try:
@@ -1120,32 +986,10 @@ async def reboot_server_api(ip: str = Form(...)):
     script_name = "reboot.sh"
     try:
         success, message = await deploy_script(ip, script_name)
-=======
-    logger.info(f"Server {ip} deleted successfully")
-    return {"message": "Server deleted successfully"}
-
-@app.post("/api/reboot_server")
-async def reboot_server_api(ip: str = Form(...)):
-    try:
-        ipaddress.ip_address(ip)
-        logger.info(f"Valid IP address for reboot: {ip}")
-    except ValueError:
-        logger.error(f"Invalid IP address for reboot: {ip}")
-        raise HTTPException(status_code=400, detail="Invalid IP address")
-
-    script_name = "reboot.sh"
-    logger.info(f"Attempting to reboot server {ip} with script {script_name}")
-
-    loop = asyncio.get_event_loop()
-    try:
-        success, message = await loop.run_in_executor(None, deploy_script, ip, script_name)
-        logger.info(f"deploy_script result for {ip}: success={success}, message={message}")
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
         if not success:
             logger.error(f"Failed to reboot server {ip}: {message}")
             raise HTTPException(status_code=500, detail=f"Failed to reboot server: {message}")
     except Exception as e:
-<<<<<<< HEAD
         logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to reboot server: {str(e)}")
     logger.info(f"Server {ip} rebooted successfully")
@@ -1400,10 +1244,3 @@ async def get_uptime_summary(period: str = Query('24h')):
 
 def show_toast(message, type):
     logger.info(f"Toast: {type} - {message}")
-=======
-        logger.error(f"Exception in deploy_script for {ip}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to reboot server: {str(e)}")
-
-    logger.info(f"Server {ip} rebooted successfully")
-    return {"message": "Server rebooted successfully"}
->>>>>>> 26a4cfa9a7433dd8ae3df4677490dce261a4058a
