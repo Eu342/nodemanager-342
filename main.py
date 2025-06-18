@@ -7,12 +7,12 @@ import traceback
 import asyncpg
 import socket
 from contextlib import asynccontextmanager
-from typing import List
-from fastapi import FastAPI, Form, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from typing import List, Dict, Any, Optional
+from fastapi import FastAPI, Form, HTTPException, Query, Depends, Request, status
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from db import init_db, get_vless_keys, get_vless_key, update_vless_key, add_server, get_servers, delete_server, log_server_event, get_server_events
+from pydantic import BaseModel, Field, validator, IPvAnyAddress
+from db import init_db, get_vless_keys, get_vless_key, update_vless_key, add_server, get_servers, delete_server, log_server_event, get_server_events, get_db_pool, cleanup as db_cleanup
 from ssh_utils import deploy_script, check_server_availability
 from config import Config
 import aiohttp
@@ -29,7 +29,18 @@ from datetime import datetime, timedelta
 from retrying import retry
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
-from cloudflare_utils import create_dns_record, find_dns_record, delete_dns_record
+from cloudflare_utils import create_dns_record, find_dns_record, delete_dns_record, cleanup_dns_cache
+from auth import (
+    auth_handler, init_auth_db, create_user, authenticate_user, 
+    save_refresh_token, verify_refresh_token, revoke_refresh_token,
+    get_current_user, require_admin, login_limiter, api_limiter,
+    Token, UserLogin, UserCreate
+)
+from models import (
+    ServerForm, RebootRequest, RunScriptsRequest, AddServerRequest, 
+    EditServerRequest, VlessKeyUpdate, SettingsUpdate, EventQueryParams,
+    validate_domain, validate_script_name, sanitize_string
+)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -42,6 +53,79 @@ last_status_change_time = {}
 rabbitmq_connection = None
 db_pool = None
 new_servers = set()
+dns_check_tracker = {}  # Track DNS operations per server
+
+# Rate limiting middleware
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Skip rate limiting for static files and login page
+        if request.url.path.startswith("/static/") or request.url.path == "/login":
+            return await call_next(request)
+        
+        # Get client IP
+        client_ip = request.client.host
+        
+        # Check rate limit for API endpoints
+        if request.url.path.startswith("/api/"):
+            if not api_limiter.is_allowed(client_ip):
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Too many requests"}
+                )
+        
+        response = await call_next(request)
+        return response
+
+# Authentication middleware
+class AuthMiddleware(BaseHTTPMiddleware):
+    # Paths that don't require authentication
+    PUBLIC_PATHS = [
+        "/login",
+        "/api/auth/login",
+        "/api/auth/refresh",
+        "/static/",
+        "/favicon.ico"
+    ]
+    
+    async def dispatch(self, request: Request, call_next):
+        # Check if path is public
+        for public_path in self.PUBLIC_PATHS:
+            if request.url.path.startswith(public_path):
+                return await call_next(request)
+        
+        # Check for Authorization header
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            # For HTML pages, redirect to login
+            if not request.url.path.startswith("/api/"):
+                return HTMLResponse(
+                    content='<script>window.location.href="/login?return=' + request.url.path + '"</script>',
+                    status_code=302
+                )
+            # For API, return 401
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Not authenticated"}
+            )
+        
+        # Verify token
+        try:
+            token = auth_header.split(" ")[1]
+            payload = auth_handler.decode_token(token)
+            request.state.user = payload
+        except Exception:
+            if not request.url.path.startswith("/api/"):
+                return HTMLResponse(
+                    content='<script>window.location.href="/login?return=' + request.url.path + '"</script>',
+                    status_code=302
+                )
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or expired token"}
+            )
+        
+        response = await call_next(request)
+        return response
 
 class NoCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
@@ -49,26 +133,6 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response
-
-class ServerForm(BaseModel):
-    ip: str
-    inbound_tag: str
-
-class RebootRequest(BaseModel):
-    ips: List[str]
-
-class RunScriptsRequest(BaseModel):
-    ips: List[str]
-    script_name: str
-
-class AddServerRequest(BaseModel):
-    ips: List[str]
-    inbound_tag: str
-
-class EditServerRequest(BaseModel):
-    old_ip: str
-    new_ip: str
-    new_inbound_tag: str
 
 def get_script_name(inbound_tag: str) -> str:
     safe_tag = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', inbound_tag).strip()
@@ -97,19 +161,21 @@ async def send_telegram_alert(ip: str, status: str, duration_minutes: int):
     if not bot_token or not chat_id:
         logger.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env")
         return
-    # HTML с <code> для копирования IP
+    
     minute_form = get_minute_accusative_form(duration_minutes)
     if status == "offline":
         message = f'<b>[<code>{ip}</code>: 🔴 Офлайн]</b> - была доступна {duration_minutes} {minute_form}'
     else:
         message = f'<b>[<code>{ip}</code>: ✅ Онлайн]</b> - была недоступна {duration_minutes} {minute_form}'
+    
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": message,
         "parse_mode": "HTML"
     }
-    logger.debug(f"Sending Telegram alert for {ip}: message={message}, url={url}, payload={payload}")
+    
+    logger.debug(f"Sending Telegram alert for {ip}: message={message}")
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload) as resp:
@@ -130,20 +196,25 @@ async def init_rabbit():
         rabbitmq_user = os.getenv('RABBITMQ_USER')
         rabbitmq_pass = os.getenv('RABBITMQ_PASS')
         rabbitmq_vhost = os.getenv('RABBITMQ_VHOST', '/')
+        
         logger.debug(f"RabbitMQ config: host={rabbitmq_host}, port={rabbitmq_port}, user={rabbitmq_user}, vhost={rabbitmq_vhost}")
+        
         if not all([rabbitmq_host, rabbitmq_user, rabbitmq_pass]):
-            logger.error("Missing RabbitMQ configuration in .env: RABBITMQ_HOST, RABBITMQ_USER, or RABBITMQ_PASS is not set")
+            logger.error("Missing RabbitMQ configuration in .env")
             return False
-        connection_url = f"amqp://{rabbitmq_user}:[REDACTED]@{rabbitmq_host}:{rabbitmq_port}{rabbitmq_vhost}"
-        logger.info(f"Attempting to connect to RabbitMQ: {connection_url}")
+        
+        connection_url = f"amqp://{rabbitmq_user}:{rabbitmq_pass}@{rabbitmq_host}:{rabbitmq_port}{rabbitmq_vhost}"
+        
         rabbitmq_connection = await aio_pika.connect_robust(
-            f"amqp://{rabbitmq_user}:{rabbitmq_pass}@{rabbitmq_host}:{rabbitmq_port}{rabbitmq_vhost}",
+            connection_url,
             timeout=10
         )
         logger.info("RabbitMQ connection established")
+        
         async with rabbitmq_connection.channel() as channel:
             await channel.declare_queue('webhook_queue', durable=True)
             logger.debug("Declared webhook_queue")
+        
         await start_webhook_consumer()
         return True
     except AMQPError as e:
@@ -290,7 +361,7 @@ async def restart_xray_checker():
             raise ValueError("SSH key or valid host required")
         return True
     except Exception as e:
-        logger.error(f"Delayed restart Xray Checker: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"Failed to restart Xray Checker: {str(e)}\n{traceback.format_exc()}")
         return False
 
 async def copy_json_to_xray_checker(ip, json_data):
@@ -435,37 +506,35 @@ async def delayed_webhook_check(ip, inbound_tag, domain, inbound_letter):
 async def update_vless_keys_from_subscription():
     try:
         keys = await fetch_subscription_keys(os.getenv('SUBSCRIPTION_URL'))
-        async with db_pool.acquire() as conn:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
             async with conn.transaction():
                 for key in keys:
                     existing = await get_vless_key(key['inbound_tag'])
-                    if existing:
-                        await update_vless_key(
-                            key['inbound_tag'],
-                            key['serverName'],
-                            key['vless_key'],
-                            key['domain']
-                        )
-                    else:
-                        await update_vless_key(
-                            key['inbound_tag'],
-                            key['serverName'],
-                            key['vless_key'],
-                            key['domain']
-                        )
+                    await update_vless_key(
+                        key['inbound_tag'],
+                        key['serverName'],
+                        key['vless_key'],
+                        key['domain']
+                    )
+        
+        # Only create DNS records for NEW servers
         for key in keys:
             if key.get('inbound_letter') and key.get('domain'):
                 servers = await get_servers()
                 for server in servers:
                     ip = server[0]
                     if server[1] == key['inbound_tag']:
-                        try:
-                            ttl = int(os.getenv('DNS_TTL', '120'))
-                            await create_dns_record(ip, key['inbound_letter'], ttl, key['domain'])
-                            logger.info(f"Created DNS record for {ip} with inbound_letter {key['inbound_letter']} and domain {key['domain']}")
-                            asyncio.create_task(delayed_webhook_check(ip, key['inbound_tag'], key['domain'], key['inbound_letter']))
-                        except Exception as e:
-                            logger.error(f"Failed to create DNS record for {ip}: {str(e)}\n{traceback.format_exc()}")
+                        # Check if this is a new server that needs DNS
+                        if ip in new_servers:
+                            try:
+                                ttl = int(os.getenv('DNS_TTL', '120'))
+                                await create_dns_record(ip, key['inbound_letter'], ttl, key['domain'])
+                                logger.info(f"Created DNS record for new server {ip}")
+                                asyncio.create_task(delayed_webhook_check(ip, key['inbound_tag'], key['domain'], key['inbound_letter']))
+                            except Exception as e:
+                                logger.error(f"Failed to create DNS record for {ip}: {str(e)}\n{traceback.format_exc()}")
+        
         logger.info("VLESS keys updated successfully")
     except Exception as e:
         logger.error(f"Failed to update VLESS keys: {str(e)}\n{traceback.format_exc()}")
@@ -591,36 +660,37 @@ async def lifespan(app: FastAPI):
     global db_pool
     try:
         await init_db()
-        db_pool = await asyncpg.create_pool(
-            database=os.getenv('LOCAL_DB_DBNAME'),
-            user=os.getenv('LOCAL_DB_USER'),
-            password=os.getenv('LOCAL_DB_PASSWORD'),
-            host=os.getenv('LOCAL_DB_HOST', 'localhost'),
-            port=int(os.getenv('LOCAL_DB_PORT', '5432')),
-            min_size=1,
-            max_size=10
-        )
+        db_pool = await get_db_pool()
+        
+        # Initialize auth database
+        await init_auth_db(db_pool)
+        
         logger.info("Database pool initialized")
+        
         if not await init_rabbit():
             logger.warning("Continuing without RabbitMQ; webhook functionality will be disabled")
         else:
             logger.info("RabbitMQ initialized")
+        
         scheduler.add_job(update_vless_keys_from_subscription, 'interval', hours=int(os.getenv('SUBSCRIPTION_REFRESH_HOURS', 1)))
         scheduler.add_job(check_server_statuses, 'interval', minutes=1)
+        scheduler.add_job(cleanup_dns_cache, 'interval', hours=1)  # Cleanup DNS cache every hour
         scheduler.start()
         yield
     except Exception as e:
         logger.error(f"Failed to initialize: {str(e)}\n{traceback.format_exc()}")
         raise
     finally:
-        if db_pool:
-            await db_pool.close()
-            logger.info("Database pool closed")
+        await db_cleanup()
         if rabbitmq_connection and not rabbitmq_connection.is_closed:
             await rabbitmq_connection.close()
             logger.info("RabbitMQ connection closed")
 
 app = FastAPI(lifespan=lifespan)
+
+# Add middlewares in correct order
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -629,23 +699,161 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(NoCacheMiddleware)
+
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
 load_dotenv()
 XRAY_CHECKER_URL = f"http://{os.getenv('XRAY_CHECKER_HOST')}:{os.getenv('XRAY_CHECKER_PORT')}"
 
+# Authentication endpoints
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    try:
+        with open("static/login.html") as f:
+            return HTMLResponse(content=f.read())
+    except Exception as e:
+        logger.error(f"Error serving login.html: {str(e)}")
+        raise HTTPException(status_code=500, detail="Login page not found")
+
+@app.post("/api/auth/login", response_model=Token)
+async def login(request: Request, user_data: UserLogin):
+    client_ip = request.client.host
+    
+    # Check rate limit
+    if not login_limiter.is_allowed(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later."
+        )
+    
+    # Authenticate user
+    pool = await get_db_pool()
+    user = await authenticate_user(pool, user_data.username, user_data.password, client_ip)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password"
+        )
+    
+    # Create tokens
+    scopes = ['admin'] if user['is_admin'] else ['user']
+    access_token = auth_handler.create_access_token(user['username'], scopes)
+    refresh_token = auth_handler.create_refresh_token(user['username'])
+    
+    # Save refresh token
+    await save_refresh_token(pool, user['id'], refresh_token)
+    
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=60 * int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '60'))
+    )
+
+@app.post("/api/auth/refresh", response_model=Token)
+async def refresh_token(request: Request):
+    # Get refresh token from body or header
+    data = await request.json()
+    refresh_token = data.get('refresh_token')
+    
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token required"
+        )
+    
+    try:
+        # Decode refresh token
+        payload = auth_handler.decode_token(refresh_token)
+        if payload.get('type') != 'refresh':
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token type"
+            )
+        
+        username = payload['sub']
+        
+        # Get user from database
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow(
+                "SELECT id, is_admin FROM users WHERE username = $1 AND is_active = true",
+                username
+            )
+            
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="User not found or inactive"
+                )
+            
+            # Verify refresh token
+            if not await verify_refresh_token(pool, user['id'], refresh_token):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid refresh token"
+                )
+        
+        # Create new access token
+        scopes = ['admin'] if user['is_admin'] else ['user']
+        new_access_token = auth_handler.create_access_token(username, scopes)
+        
+        return Token(
+            access_token=new_access_token,
+            token_type="bearer",
+            expires_in=60 * int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '60'))
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token refresh error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+@app.post("/api/auth/logout")
+async def logout(current_user: Dict[str, Any] = Depends(get_current_user)):
+    # Revoke all refresh tokens for user
+    pool = await get_db_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id FROM users WHERE username = $1",
+            current_user['username']
+        )
+        
+        if user:
+            await conn.execute(
+                "UPDATE refresh_tokens SET revoked = true WHERE user_id = $1",
+                user['id']
+            )
+    
+    return {"message": "Logged out successfully"}
+
+@app.get("/api/auth/me")
+async def get_me(current_user: Dict[str, Any] = Depends(get_current_user)):
+    return {"username": current_user['username'], "scopes": current_user['scopes']}
+
+@app.post("/api/auth/users", dependencies=[Depends(require_admin)])
+async def create_new_user(user_data: UserCreate, current_user: Dict[str, Any] = Depends(require_admin)):
+    pool = await get_db_pool()
+    await create_user(pool, user_data.username, user_data.password)
+    return {"message": f"User {user_data.username} created successfully"}
+
+# Protected routes
 @app.get("/nodemanager", response_class=HTMLResponse)
-async def index():
+async def index(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         with open("static/index.html") as f:
-            logger.info("Serving index.html")
+            logger.info(f"Serving index.html for user {current_user['username']}")
             return HTMLResponse(content=f.read())
     except Exception as e:
         logger.error(f"Error serving index.html: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/add", response_class=HTMLResponse)
-async def add_server_page():
+async def add_server_page(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         with open("static/add_server.html") as f:
             logger.info("Serving add_server.html")
@@ -655,7 +863,7 @@ async def add_server_page():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/setup", response_class=HTMLResponse)
-async def setup_server_page():
+async def setup_server_page(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         with open("static/setup_server.html") as f:
             logger.info("Serving setup_server.html")
@@ -665,7 +873,7 @@ async def setup_server_page():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/list", response_class=HTMLResponse)
-async def server_list_page():
+async def server_list_page(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         with open("static/server_list.html") as f:
             logger.info("Serving server_list.html")
@@ -675,7 +883,7 @@ async def server_list_page():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/uptime", response_class=HTMLResponse)
-async def uptime_page():
+async def uptime_page(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         with open("static/uptime.html") as f:
             logger.info("Serving uptime.html")
@@ -685,7 +893,7 @@ async def uptime_page():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/settings/subscription", response_class=HTMLResponse)
-async def settings_subscription_page():
+async def settings_subscription_page(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         with open("static/settings_subscription.html") as f:
             logger.info("Serving settings_subscription.html")
@@ -694,8 +902,9 @@ async def settings_subscription_page():
         logger.error(f"Error serving settings_subscription.html: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+# API endpoints (all protected)
 @app.get("/api/vless_keys")
-async def get_vless_keys_api():
+async def get_vless_keys_api(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         keys = await get_vless_keys()
         if not keys:
@@ -708,7 +917,7 @@ async def get_vless_keys_api():
         raise HTTPException(status_code=500, detail="Failed to fetch vless keys")
 
 @app.get("/api/inbound_tags")
-async def get_inbound_tags():
+async def get_inbound_tags(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         keys = await get_vless_keys()
         tags = [key['inbound_tag'] for key in keys]
@@ -719,9 +928,11 @@ async def get_inbound_tags():
         raise HTTPException(status_code=500, detail="Failed to fetch inbound tags")
 
 @app.get("/api/scripts")
-async def get_scripts():
+async def get_scripts(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         scripts = [f for f in os.listdir(Config.SCRIPTS_PATH) if f.endswith('.sh')]
+        # Validate script names
+        scripts = [s for s in scripts if re.match(r'^[\w\-]+\.sh$', s)]
         if not scripts:
             logger.warning("No scripts found in scripts directory")
             return {"scripts": []}
@@ -732,26 +943,43 @@ async def get_scripts():
         raise HTTPException(status_code=500, detail="Failed to fetch scripts")
 
 @app.get("/api/settings")
-async def get_settings():
+async def get_settings(current_user: Dict[str, Any] = Depends(get_current_user)):
     return {"subscription_url": os.getenv('SUBSCRIPTION_URL', '')}
 
 @app.post("/api/settings")
-async def update_settings(settings: dict):
+async def update_settings(settings: SettingsUpdate, current_user: Dict[str, Any] = Depends(require_admin)):
     try:
-        with open(".env", "r") as f:
-            lines = f.readlines()
-        with open(".env", "w") as f:
-            for line in lines:
-                if line.startswith("SUBSCRIPTION_URL"):
-                    f.write(f"SUBSCRIPTION_URL={settings['subscription_url']}\n")
-                elif line.startswith("SUBSCRIPTION_REFRESH_HOURS"):
-                    f.write(f"SUBSCRIPTION_REFRESH_HOURS={settings.get('refresh_hours', 1)}\n")
-                else:
-                    f.write(line)
-        os.environ.update({
-            "SUBSCRIPTION_URL": settings['subscription_url'],
-            "SUBSCRIPTION_REFRESH_HOURS": str(settings.get('refresh_hours', 1))
-        })
+        # Read current .env
+        env_vars = {}
+        if os.path.exists('.env'):
+            with open('.env', 'r') as f:
+                for line in f:
+                    if '=' in line:
+                        key, value = line.strip().split('=', 1)
+                        env_vars[key] = value
+        
+        # Update with new values
+        if settings.subscription_url is not None:
+            env_vars['SUBSCRIPTION_URL'] = settings.subscription_url
+        if settings.refresh_hours is not None:
+            env_vars['SUBSCRIPTION_REFRESH_HOURS'] = str(settings.refresh_hours)
+        if settings.telegram_bot_token is not None:
+            env_vars['TELEGRAM_BOT_TOKEN'] = settings.telegram_bot_token
+        if settings.telegram_chat_id is not None:
+            env_vars['TELEGRAM_CHAT_ID'] = settings.telegram_chat_id
+        if settings.dns_ttl is not None:
+            env_vars['DNS_TTL'] = str(settings.dns_ttl)
+        if settings.cloudflare_api_token is not None:
+            env_vars['CLOUDFLARE_API_TOKEN'] = settings.cloudflare_api_token
+        
+        # Write back to .env
+        with open('.env', 'w') as f:
+            for key, value in env_vars.items():
+                f.write(f"{key}={value}\n")
+        
+        # Update environment
+        os.environ.update(env_vars)
+        
         logger.info("Settings updated successfully")
         return {"message": "Settings updated"}
     except Exception as e:
@@ -759,7 +987,7 @@ async def update_settings(settings: dict):
         raise HTTPException(status_code=500, detail="Failed to update settings")
 
 @app.post("/api/refresh_keys")
-async def refresh_keys():
+async def refresh_keys(current_user: Dict[str, Any] = Depends(require_admin)):
     try:
         await update_vless_keys_from_subscription()
         logger.info("Keys refreshed successfully")
@@ -769,23 +997,18 @@ async def refresh_keys():
         raise HTTPException(status_code=500, detail="Failed to refresh keys")
 
 @app.post("/api/add_server")
-async def add_server_api(request: AddServerRequest):
+async def add_server_api(request: AddServerRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     logger.debug(f"Received /api/add_server request: {request}")
-    try:
-        for ip in request.ips:
-            if not is_valid_ip(ip):
-                logger.error(f"Invalid IP address: {ip}")
-                raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}")
-    except ValueError:
-        logger.error(f"Invalid IP address in {request.ips}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=400, detail="Invalid IP address")
+    
     script_name = get_script_name(request.inbound_tag)
     script_path = os.path.join(Config.SCRIPTS_PATH, script_name)
     if not os.path.exists(script_path):
         logger.error(f"Script {script_path} not found for inbound_tag: {request.inbound_tag}")
         raise HTTPException(status_code=400, detail=f"Script {script_name} not found")
+    
     results = []
     semaphore = asyncio.Semaphore(10)
+    
     async def deploy_and_add(ip):
         async with semaphore:
             logger.info(f"Attempting to deploy script {script_name} on {ip}")
@@ -795,18 +1018,24 @@ async def add_server_api(request: AddServerRequest):
                 if not key:
                     logger.error(f"Location {request.inbound_tag} not found for {ip}")
                     return {"ip": ip, "success": False, "message": f"Location {request.inbound_tag} not found"}
+                
                 if await check_ip_in_xray_checker(ip) != "unknown":
                     logger.debug(f"IP {ip} already in XrayChecker, forcing JSON update")
+                
                 if not await update_xray_checker_json(ip, request.inbound_tag, key['vless_key']):
                     return {"ip": ip, "success": False, "message": "Failed to update Xray Checker JSON"}
+                
                 success, message = await deploy_script(ip, script_name)
                 logger.debug(f"deploy_script result for {ip}: success={success}, message={message}")
+                
                 if not isinstance(success, bool):
                     logger.error(f"Invalid success type from deploy_script: {success} for {ip}")
                     return {"ip": ip, "success": False, "message": f"Invalid deploy_script response: {success}"}
+                
                 if success:
                     logger.debug(f"Acquiring DB connection for {ip}")
-                    async with db_pool.acquire() as conn:
+                    pool = await get_db_pool()
+                    async with pool.acquire() as conn:
                         async with conn.transaction():
                             await conn.execute(
                                 """
@@ -819,6 +1048,8 @@ async def add_server_api(request: AddServerRequest):
                             )
                     logger.debug(f"DB updated for {ip}")
                     await asyncio.sleep(5)
+                    
+                    # Only create DNS for new servers
                     if key.get('domain'):
                         key_data = parse_vless_key(key['vless_key'])
                         if key_data.get('inbound_letter'):
@@ -830,14 +1061,17 @@ async def add_server_api(request: AddServerRequest):
                             except Exception as e:
                                 logger.error(f"Failed to create DNS record for {ip}: {str(e)}\n{traceback.format_exc()}")
                                 return {"ip": ip, "success": False, "message": f"Failed to create DNS record: {str(e)}"}
+                    
                     new_servers.add(ip)
                     logger.info(f"Server {ip} added/updated successfully")
                     return {"ip": ip, "success": True, "message": "Server added successfully"}
+                
                 logger.error(f"Failed to deploy script on {ip}: {message}")
                 return {"ip": ip, "success": False, "message": message}
             except Exception as e:
                 logger.error(f"Error deploying script on {ip}: {str(e)}\n{traceback.format_exc()}")
                 return {"ip": ip, "success": False, "message": str(e)}
+    
     tasks = [deploy_and_add(ip) for ip in request.ips]
     results = await asyncio.gather(*tasks)
     response = {"results": results}
@@ -845,16 +1079,9 @@ async def add_server_api(request: AddServerRequest):
     return response
 
 @app.post("/api/add_server_manual")
-async def add_server_manual_api(request: AddServerRequest):
+async def add_server_manual_api(request: AddServerRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     logger.debug(f"Received /api/add_server_manual request: {request}")
-    try:
-        for ip in request.ips:
-            if not is_valid_ip(ip):
-                logger.error(f"Invalid IP address: {ip}")
-                raise HTTPException(status_code=400, detail="Invalid IP address")
-    except ValueError:
-        logger.error(f"Invalid IP address in {request.ips}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=400, detail="Invalid IP address")
+    
     results = []
     for ip in request.ips:
         logger.info(f"Attempting to add server {ip} to database")
@@ -865,13 +1092,17 @@ async def add_server_manual_api(request: AddServerRequest):
                 logger.error(f"Location {request.inbound_tag} not found for {ip}")
                 results.append({"ip": ip, "success": False, "message": f"Location {request.inbound_tag} not found"})
                 continue
+            
             if await check_ip_in_xray_checker(ip) != "unknown":
                 logger.debug(f"IP {ip} already in XrayChecker, forcing JSON update")
+            
             if not await update_xray_checker_json(ip, request.inbound_tag, key['vless_key']):
                 results.append({"ip": ip, "success": False, "message": "Failed to update Xray Checker JSON"})
                 continue
+            
             logger.debug(f"Acquiring DB connection for {ip}")
-            async with db_pool.acquire() as conn:
+            pool = await get_db_pool()
+            async with pool.acquire() as conn:
                 async with conn.transaction():
                     await conn.execute(
                         """
@@ -884,6 +1115,8 @@ async def add_server_manual_api(request: AddServerRequest):
                     )
             logger.debug(f"DB updated for {ip}")
             await asyncio.sleep(5)
+            
+            # Only create DNS for new servers
             if key.get('domain'):
                 key_data = parse_vless_key(key['vless_key'])
                 if key_data.get('inbound_letter'):
@@ -896,18 +1129,20 @@ async def add_server_manual_api(request: AddServerRequest):
                         logger.error(f"Failed to create DNS record for {ip}: {str(e)}\n{traceback.format_exc()}")
                         results.append({"ip": ip, "success": False, "message": f"Failed to create DNS record: {str(e)}"})
                         continue
+            
             new_servers.add(ip)
             logger.info(f"Server {ip} added/updated successfully")
             results.append({"ip": ip, "success": True, "message": "Server added successfully"})
         except Exception as e:
             logger.error(f"Error adding server {ip}: {str(e)}\n{traceback.format_exc()}")
             results.append({"ip": ip, "success": False, "message": str(e)})
+    
     response = {"results": results}
     logger.info(f"Manual server addition completed: {response}")
     return response
 
 @app.get("/api/servers")
-async def get_servers_api():
+async def get_servers_api(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         servers = await get_servers()
         formatted_servers = [
@@ -924,32 +1159,32 @@ async def get_servers_api():
         raise HTTPException(status_code=500, detail="Failed to fetch servers")
 
 @app.delete("/api/delete_server")
-async def delete_server_api(ip: str = Query(...)):
+async def delete_server_api(ip: str = Query(...), current_user: Dict[str, Any] = Depends(get_current_user)):
     logger.debug(f"Received DELETE /api/delete_server request for IP: {ip}")
-    try:
-        ipaddress.ip_address(ip)
-    except ValueError:
-        logger.error(f"Invalid IP address for deletion: {ip}\n{traceback.format_exc()}")
+    
+    # Validate IP
+    if not is_valid_ip(ip):
         raise HTTPException(status_code=400, detail="Invalid IP address")
-
+    
     servers = await get_servers()
     server = next((s for s in servers if s[0] == ip), None)
     if not server:
         logger.error(f"Server {ip} not found in database")
         raise HTTPException(status_code=404, detail="Server not found")
+    
     inbound_tag = server[1]
-
+    
     key = await get_vless_key(inbound_tag)
     domain = key.get('domain') if key else None
     inbound_letter = None
     if key:
         key_data = parse_vless_key(key['vless_key'])
         inbound_letter = key_data.get('inbound_letter')
-
+    
     if not await delete_server(ip):
         logger.error(f"Failed to delete server {ip}: not found in database")
         raise HTTPException(status_code=404, detail="Server not found")
-
+    
     try:
         if domain and inbound_letter:
             try:
@@ -963,12 +1198,14 @@ async def delete_server_api(ip: str = Query(...)):
                 logger.error(f"Failed to delete DNS record for {ip} in domain {domain}: {str(e)}\n{traceback.format_exc()}")
         else:
             logger.warning(f"No domain or inbound_letter found for {ip} (inbound_tag: {inbound_tag})")
-
+        
         if not await remove_existing_json(ip):
             logger.error(f"Failed to remove JSON for {ip}")
             raise HTTPException(status_code=500, detail="Failed to remove JSON")
+        
         if not await restart_xray_checker():
             logger.warning(f"Failed to restart Xray Checker for {ip}, but JSON removed")
+        
         logger.info(f"Server {ip} deleted successfully from database, JSON removed")
         return {"message": "Server deleted successfully"}
     except Exception as e:
@@ -976,13 +1213,12 @@ async def delete_server_api(ip: str = Query(...)):
         raise HTTPException(status_code=500, detail=f"Failed to remove JSON or restart Xray Checker: {str(e)}")
 
 @app.post("/api/reboot_server")
-async def reboot_server_api(ip: str = Form(...)):
+async def reboot_server_api(ip: str = Form(...), current_user: Dict[str, Any] = Depends(get_current_user)):
     logger.info(f"Received reboot request for IP: {ip}")
-    try:
-        ipaddress.ip_address(ip)
-    except ValueError:
-        logger.error(f"Invalid IP address for reboot: {ip}\n{traceback.format_exc()}")
+    
+    if not is_valid_ip(ip):
         raise HTTPException(status_code=400, detail="Invalid IP address")
+    
     script_name = "reboot.sh"
     try:
         success, message = await deploy_script(ip, script_name)
@@ -992,30 +1228,28 @@ async def reboot_server_api(ip: str = Form(...)):
     except Exception as e:
         logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to reboot server: {str(e)}")
+    
     logger.info(f"Server {ip} rebooted successfully")
     return {"message": "Server rebooted successfully"}
 
 @app.post("/api/reboot_servers")
-async def reboot_servers_api(request: RebootRequest):
+async def reboot_servers_api(request: RebootRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     logger.info(f"Received mass reboot request for IPs: {request.ips}")
-    for ip in request.ips:
-        try:
-            ipaddress.ip_address(ip)
-        except ValueError:
-            logger.error(f"Invalid IP address: {ip}\n{traceback.format_exc()}")
-            raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}")
+    
     script_name = "reboot.sh"
     results = []
     semaphore = asyncio.Semaphore(5)
+    
     async def run_deploy_script(ip):
         async with semaphore:
             logger.info(f"Attempting to reboot server {ip} with script {script_name}")
             try:
-                success, message = await deploy_script(ip, script_name)
-                return {"ip": ip, "success": success, "message": message}
+                success, message = await deploy_script(str(ip), script_name)
+                return {"ip": str(ip), "success": success, "message": message}
             except Exception as e:
                 logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
-                return {"ip": ip, "success": False, "message": str(e)}
+                return {"ip": str(ip), "success": False, "message": str(e)}
+    
     tasks = [run_deploy_script(ip) for ip in request.ips]
     results = await asyncio.gather(*tasks)
     response = {"results": results}
@@ -1023,29 +1257,33 @@ async def reboot_servers_api(request: RebootRequest):
     return response
 
 @app.post("/api/run_scripts")
-async def run_scripts_api(request: RunScriptsRequest):
+async def run_scripts_api(request: RunScriptsRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     logger.info(f"Received request to run script {request.script_name} on IPs: {request.ips}")
-    for ip in request.ips:
-        try:
-            ipaddress.ip_address(ip)
-        except ValueError:
-            logger.error(f"Invalid IP address: {ip}\n{traceback.format_exc()}")
-            raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}")
-    script_path = os.path.join(Config.SCRIPTS_PATH, request.script_name)
+    
+    # Validate script name
+    try:
+        script_name = validate_script_name(request.script_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    script_path = os.path.join(Config.SCRIPTS_PATH, script_name)
     if not os.path.exists(script_path):
-        logger.error(f"Script {request.script_name} not found in {Config.SCRIPTS_PATH}")
-        raise HTTPException(status_code=400, detail=f"Script {request.script_name} not found")
+        logger.error(f"Script {script_name} not found in {Config.SCRIPTS_PATH}")
+        raise HTTPException(status_code=400, detail=f"Script {script_name} not found")
+    
     results = []
     semaphore = asyncio.Semaphore(5)
+    
     async def run_deploy_script(ip):
         async with semaphore:
-            logger.info(f"Attempting to run script {request.script_name} on {ip}")
+            logger.info(f"Attempting to run script {script_name} on {ip}")
             try:
-                success, message = await deploy_script(ip, script_name)
-                return {"ip": ip, "success": success, "message": message}
+                success, message = await deploy_script(str(ip), script_name)
+                return {"ip": str(ip), "success": success, "message": message}
             except Exception as e:
                 logger.error(f"Exception in deploy_script for {ip}: {str(e)}\n{traceback.format_exc()}")
-                return {"ip": ip, "success": False, "message": str(e)}
+                return {"ip": str(ip), "success": False, "message": str(e)}
+    
     tasks = [run_deploy_script(ip) for ip in request.ips]
     results = await asyncio.gather(*tasks)
     response = {"results": results}
@@ -1053,30 +1291,27 @@ async def run_scripts_api(request: RunScriptsRequest):
     return response
 
 @app.post("/api/edit_server")
-async def edit_server_api(request: EditServerRequest):
+async def edit_server_api(request: EditServerRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     logger.info(f"Edit server request: {request}")
-    try:
-        ipaddress.ip_address(request.old_ip)
-        ipaddress.ip_address(request.new_ip)
-    except ValueError:
-        logger.error(f"Invalid IP: old_ip={request.old_ip}, new_ip={request.new_ip}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=400, detail="Invalid IP address")
+    
     try:
         servers = await get_servers()
-        server = next((s for s in servers if s[0] == request.old_ip), None)
+        server = next((s for s in servers if s[0] == str(request.old_ip)), None)
         if not server:
             logger.error(f"Server {request.old_ip} not found")
             raise HTTPException(status_code=404, detail="Server not found")
+        
         key = await get_vless_key(request.new_inbound_tag)
         if not key:
             logger.error(f"Inbound tag {request.new_inbound_tag} not found")
             raise HTTPException(status_code=400, detail=f"Inbound tag {request.new_inbound_tag} not found")
         
-        async with db_pool.acquire() as conn:
+        pool = await get_db_pool()
+        async with pool.acquire() as conn:
             async with conn.transaction():
-                if request.old_ip != request.new_ip or server[1] != request.new_inbound_tag:
+                if str(request.old_ip) != str(request.new_ip) or server[1] != request.new_inbound_tag:
                     try:
-                        record = await find_dns_record(request.old_ip, key['domain'])
+                        record = await find_dns_record(str(request.old_ip), key['domain'])
                         if record:
                             await delete_dns_record(record['id'], key['domain'])
                             logger.info(f"Deleted DNS record for {request.old_ip}")
@@ -1084,14 +1319,16 @@ async def edit_server_api(request: EditServerRequest):
                             logger.debug(f"No DNS record found for {request.old_ip} in domain {key['domain']}")
                     except Exception as e:
                         logger.error(f"Failed to delete DNS record for {request.old_ip}: {str(e)}")
-                    if not await remove_existing_json(request.old_ip):
+                    
+                    if not await remove_existing_json(str(request.old_ip)):
                         logger.error(f"Failed to remove JSON for {request.old_ip}")
                         raise HTTPException(status_code=500, detail="Failed to remove old JSON")
-                if not await update_xray_checker_json(request.new_ip, request.new_inbound_tag, key['vless_key']):
+                
+                if not await update_xray_checker_json(str(request.new_ip), request.new_inbound_tag, key['vless_key']):
                     logger.error(f"Failed to update JSON for {request.new_ip}")
                     raise HTTPException(status_code=500, detail="Failed to update Xray Checker JSON")
                 
-                delete_result = await conn.execute("DELETE FROM servers WHERE ip = $1", request.old_ip)
+                delete_result = await conn.execute("DELETE FROM servers WHERE ip = $1", str(request.old_ip))
                 logger.debug(f"Delete result for {request.old_ip}: {delete_result}")
                 if delete_result == 'DELETE 0':
                     logger.error(f"Failed to delete {request.old_ip} from database: not found")
@@ -1104,41 +1341,44 @@ async def edit_server_api(request: EditServerRequest):
                     ON CONFLICT (ip) DO UPDATE
                     SET inbound_tag = $2, install_date = CURRENT_TIMESTAMP
                     """,
-                    request.new_ip, request.new_inbound_tag
+                    str(request.new_ip), request.new_inbound_tag
                 )
                 logger.debug(f"Added new server {request.new_ip} with inbound_tag {request.new_inbound_tag}")
         
         await asyncio.sleep(5)
+        
+        # Only create DNS for new IP
         if key.get('domain'):
             key_data = parse_vless_key(key['vless_key'])
             if key_data.get('inbound_letter'):
                 try:
                     ttl = int(os.getenv('DNS_TTL', '120'))
-                    await create_dns_record(request.new_ip, key_data['inbound_letter'], ttl, key['domain'])
+                    await create_dns_record(str(request.new_ip), key_data['inbound_letter'], ttl, key['domain'])
                     logger.info(f"Created DNS record for {request.new_ip} with inbound_letter {key_data['inbound_letter']} and domain {key['domain']}")
-                    asyncio.create_task(delayed_webhook_check(request.new_ip, request.new_inbound_tag, key['domain'], key_data['inbound_letter']))
+                    asyncio.create_task(delayed_webhook_check(str(request.new_ip), request.new_inbound_tag, key['domain'], key_data['inbound_letter']))
                 except Exception as e:
                     logger.error(f"Failed to create DNS record for {request.new_ip}: {str(e)}\n{traceback.format_exc()}")
                     raise HTTPException(status_code=500, detail=f"Failed to create DNS record: {str(e)}")
-        new_servers.add(request.new_ip)
+        
+        new_servers.add(str(request.new_ip))
         logger.info(f"Server updated: {request.old_ip} -> {request.new_ip}, inbound_tag: {request.new_inbound_tag}")
         return {"success": True, "message": "Server updated"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error editing {request.old_ip}: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to update database: {str(e)}")
 
 @app.get("/api/check_availability")
-async def check_availability_api(ip: str):
-    try:
-        ipaddress.ip_address(ip)
-    except ValueError:
-        logger.error(f"Invalid IP address: {ip}\n{traceback.format_exc()}")
+async def check_availability_api(ip: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    if not is_valid_ip(ip):
         raise HTTPException(status_code=400, detail="Invalid IP address")
+    
     is_available, message = await check_server_availability(ip)
     return {"ip": ip, "available": is_available, "message": message}
 
 @app.get("/api/server_status")
-async def get_server_status():
+async def get_server_status(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         statuses = {}
         servers = await get_servers()
@@ -1155,22 +1395,32 @@ async def get_server_status():
         return {"statuses": {}}
 
 @app.get("/api/server_events")
-async def get_server_events_api(period: str = Query('24h'), server_ip: str = Query(None), limit: int = Query(100)):
+async def get_server_events_api(
+    query: EventQueryParams = Depends(),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     try:
-        period_hours = {'24h': 24, '7d': 168, '30d': 720}.get(period, 24)
-        events = await get_server_events(period_hours, server_ip, limit)
-        logger.info(f"Returning {len(events)} server events for period {period}")
+        period_hours = {'24h': 24, '7d': 168, '30d': 720}.get(query.period, 24)
+        events = await get_server_events(
+            period_hours, 
+            str(query.server_ip) if query.server_ip else None, 
+            query.limit
+        )
+        logger.info(f"Returning {len(events)} server events for period {query.period}")
         return {"events": events}
     except Exception as e:
         logger.error(f"Error fetching server events: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to fetch server events")
 
 @app.get("/api/uptime/summary")
-async def get_uptime_summary(period: str = Query('24h')):
+async def get_uptime_summary(
+    period: str = Query('24h', pattern=r'^(24h|7d|30d)),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
     try:
         period_hours = {'24h': 24, '7d': 168, '30d': 720}.get(period, 24)
         servers = await get_servers()
-        statuses = (await get_server_status())['statuses']
+        statuses = (await get_server_status(current_user))['statuses']
         events = await get_server_events(period_hours, limit=100)
         logger.debug(f"Fetched {len(events)} events for uptime summary")
         
@@ -1179,6 +1429,7 @@ async def get_uptime_summary(period: str = Query('24h')):
             ip = server[0]
             if not is_valid_ip(ip):
                 continue
+            
             server_events = [e for e in events if e['server_ip'] == ip]
             total_events = len([e for e in server_events if e['event_type'] in ['online', 'offline_start', 'offline_end']])
             
