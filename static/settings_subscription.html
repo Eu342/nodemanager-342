@@ -373,6 +373,7 @@
 
     <div class="toast-container" id="toastContainer"></div>
 
+    <!-- Load auth utils BEFORE main script -->
     <script src="/static/js/auth_utils.js"></script>
     <script>
         // Common UI functions
@@ -478,7 +479,7 @@
         // Load current settings
         async function loadSettings() {
             try {
-                const response = await authUtils.fetchWithAuth('/api/settings');
+                const response = await window.authUtils.fetchWithAuth('/api/settings');
                 if (!response || !response.ok) {
                     throw new Error('Failed to load settings');
                 }
@@ -489,6 +490,9 @@
                 if (data.subscription_url) {
                     document.getElementById('subscriptionUrl').value = data.subscription_url;
                 }
+                
+                // Note: For security reasons, we don't populate sensitive fields like tokens
+                // They should only be set when explicitly entered by the user
                 
                 showToast('Настройки загружены', 'success');
             } catch (error) {
@@ -517,7 +521,7 @@
                     }
                 }
                 
-                const response = await authUtils.fetchWithAuth('/api/settings', {
+                const response = await window.authUtils.fetchWithAuth('/api/settings', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -526,13 +530,14 @@
                 });
                 
                 if (!response || !response.ok) {
-                    throw new Error('Failed to save settings');
+                    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+                    throw new Error(error.detail || 'Failed to save settings');
                 }
                 
                 showToast('Настройки сохранены успешно', 'success');
             } catch (error) {
                 console.error('Error saving settings:', error);
-                showToast('Ошибка сохранения настроек', 'error');
+                showToast('Ошибка сохранения настроек: ' + error.message, 'error');
             } finally {
                 saveButton.disabled = false;
                 saveButton.innerHTML = originalText;
@@ -548,18 +553,19 @@
             refreshButton.innerHTML = '<svg class="loading" style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="15"></circle></svg> Обновление...';
             
             try {
-                const response = await authUtils.fetchWithAuth('/api/refresh_keys', {
+                const response = await window.authUtils.fetchWithAuth('/api/refresh_keys', {
                     method: 'POST'
                 });
                 
                 if (!response || !response.ok) {
-                    throw new Error('Failed to refresh keys');
+                    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+                    throw new Error(error.detail || 'Failed to refresh keys');
                 }
                 
                 showToast('Ключи успешно обновлены', 'success');
             } catch (error) {
                 console.error('Error refreshing keys:', error);
-                showToast('Ошибка обновления ключей', 'error');
+                showToast('Ошибка обновления ключей: ' + error.message, 'error');
             } finally {
                 refreshButton.disabled = false;
                 refreshButton.innerHTML = originalText;
@@ -568,6 +574,13 @@
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
+            // Check if authUtils is loaded
+            if (!window.authUtils) {
+                console.error('authUtils not loaded!');
+                showToast('Ошибка загрузки страницы', 'error');
+                return;
+            }
+
             loadTheme();
             loadSettings();
             

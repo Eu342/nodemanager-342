@@ -1,7 +1,18 @@
-const SCRIPT_VERSION = 'original-logic-themed-v2.4-dropdown-fix';
+(function() {
+    'use strict';
+    
+    const SCRIPT_VERSION = 'original-logic-themed-v2.4-dropdown-fix-auth';
 
-// --- Глобальные переменные из вашего оригинального JS ---
-let allServers = [];
+    // --- Проверка загрузки auth_utils ---
+    if (typeof window.authUtils === 'undefined') {
+        console.error('auth_utils.js must be loaded before server_list.js');
+    }
+
+    // Создаем локальную ссылку на fetchWithAuth для удобства
+    const fetchWithAuth = window.authUtils?.fetchWithAuth || fetch;
+
+    // --- Глобальные переменные из вашего оригинального JS ---
+    let allServers = [];
 let filteredServers = [];
 let selectedServers = new Set();
 let currentSort = { field: 'install_date', direction: 'desc' };
@@ -114,8 +125,8 @@ async function loadServers() {
 
     try {
         const [serversResponse, statusesResponse] = await Promise.all([
-            fetch('/api/servers'),
-            fetch('/api/server_status')
+            fetchWithAuth('/api/servers'),
+            fetchWithAuth('/api/server_status')
         ]);
         if (!serversResponse.ok) throw new Error(`HTTP error! status: ${serversResponse.status}`);
         if (!statusesResponse.ok) throw new Error(`HTTP error! status: ${statusesResponse.status}`);
@@ -142,7 +153,7 @@ async function loadServers() {
 
 async function loadScripts() {
     try {
-        const response = await fetch('/api/scripts');
+        const response = await fetchWithAuth('/api/scripts');
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         availableScripts = (await response.json()).scripts || [];
         populateScriptSelect(document.getElementById('scriptSelect'));
@@ -561,7 +572,7 @@ async function executeRunScript(ips, scriptName) {
     
     try {
         showToast(`Запуск "${scriptName}" на ${ips.length} сервер(ах)...`, 'info', 5000);
-        const response = await fetch('/api/run_scripts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips, script_name: scriptName }) });
+        const response = await fetchWithAuth('/api/run_scripts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips, script_name: scriptName }) });
         if (!response.ok) { const err = await response.json().catch(()=>({})); throw new Error(err.detail || `HTTP ${response.status}`); }
         const data = await response.json();
         let successes = 0, errors = 0, errorMsgs = [];
@@ -587,7 +598,7 @@ async function executeReboot(ips) {
     if(btnInBar) { btnInBar.classList.add('loading'); btnInBar.disabled = true; }
     try {
         showToast(`Перезагрузка ${ips.length} сервер(ах)...`, 'info', 5000);
-        const response = await fetch('/api/reboot_servers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips }) });
+        const response = await fetchWithAuth('/api/reboot_servers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips }) });
         if (!response.ok) { const err = await response.json().catch(()=>({})); throw new Error(err.detail || `HTTP ${response.status}`); }
         const data = await response.json();
         let successes = 0, errors = 0, errorMsgs = [];
@@ -602,7 +613,13 @@ async function executeReboot(ips) {
 async function showEditServerModal(ip) {
     const server = allServers.find(s => s.ip === ip);
     if (!server) { showToast('Сервер не найден.', 'error'); return; }
-    let tags = []; try { const r = await fetch('/api/inbound_tags'); if(r.ok) tags=(await r.json()).tags||[];} catch(e){console.error("Failed to load tags for edit:", e);}
+    let tags = []; 
+    try { 
+        const r = await fetchWithAuth('/api/inbound_tags'); 
+        if(r.ok) tags=(await r.json()).tags||[];
+    } catch(e){
+        console.error("Failed to load tags for edit:", e);
+    }
     const content = `
         <div class="form-group"><label for="modalEditIpInput">IP адрес:</label><input type="text" id="modalEditIpInput" class="form-input" value="${server.ip}" required></div>
         <div class="form-group"><label for="modalEditInboundTagInput">Inbound Tag:</label><select id="modalEditInboundTagInput" class="form-select" required><option value="">Выберите тег...</option>${tags.map(t => `<option value="${t}" ${t === server.inbound_tag ? 'selected' : ''}>${t}</option>`).join('')}${(!tags.includes(server.inbound_tag) && server.inbound_tag && server.inbound_tag !== 'N/A') ? `<option value="${server.inbound_tag}" selected>${server.inbound_tag} (текущий)</option>` : ''}</select></div>`;
@@ -615,7 +632,7 @@ async function executeEditServer(data) {
     if (!newIp || !newTag) { showToast('Заполните все поля.', 'error'); return; }
     try {
         showToast(`Сохранение ${data.oldIp}...`, 'info');
-        const response = await fetch('/api/edit_server', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ old_ip: data.oldIp, new_ip: newIp, new_inbound_tag: newTag }) });
+        const response = await fetchWithAuth('/api/edit_server', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ old_ip: data.oldIp, new_ip: newIp, new_inbound_tag: newTag }) });
         if (!response.ok) { const err = await response.json().catch(()=>({})); throw new Error(err.detail || `HTTP ${response.status}`); }
         const result = await response.json();
         if (result.success) { showToast(`Сервер ${data.oldIp} обновлен.`, 'success'); await loadServers(); }
@@ -652,7 +669,7 @@ async function executeDeleteServers(ips) {
 
     const results = await Promise.allSettled(
         ips.map(ip =>
-            fetch(`/api/delete_server?ip=${encodeURIComponent(ip)}`, {
+            fetchWithAuth(`/api/delete_server?ip=${encodeURIComponent(ip)}`, {
                 method: 'DELETE'
             }).then(async response => { 
                 if (!response.ok) {
@@ -703,3 +720,12 @@ function bulkDelete() {
     if (selectedServers.size === 0) { showToast('Выберите серверы для удаления.', 'error'); return; }
     showDeleteModal(Array.from(selectedServers));
 }
+
+// Make functions available globally (for inline event handlers)
+window.toggleServerSelection = toggleServerSelection;
+window.toggleSelectAll = toggleSelectAll;
+window.sortTable = sortTable;
+window.toggleDropdown = toggleDropdown;
+window.bulkRunScriptFromBar = bulkRunScriptFromBar;
+
+})(); // Конец IIFE

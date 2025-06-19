@@ -1,5 +1,17 @@
-const SCRIPT_VERSION = '2025-06-04-v9-fixes';
-let currentPeriod = '24h';
+(function() {
+    'use strict';
+    
+    const SCRIPT_VERSION = '2025-06-04-v9-fixes-auth';
+
+    // --- Проверка загрузки auth_utils ---
+    if (typeof window.authUtils === 'undefined') {
+        console.error('auth_utils.js must be loaded before uptime.js');
+    }
+
+    // Создаем локальную ссылку на fetchWithAuth для удобства
+    const fetchWithAuth = window.authUtils?.fetchWithAuth || fetch;
+
+    let currentPeriod = '24h';
 let serversData = [];
 let eventsData = [];
 let currentFilter = 'all';
@@ -28,7 +40,7 @@ function waitForElement(selector, maxAttempts = 50, delay = 100) {
 async function fetchWithRetry(url, retries = 3, delay = 1000) {
     for (let i = 0; i < retries; i++) {
         try {
-            const response = await fetch(url, {
+            const response = await fetchWithAuth(url, {
                 cache: 'no-store',
                 headers: { 'Accept': 'application/json' },
                 mode: 'cors'
@@ -629,3 +641,5 @@ function closeMobileMenu() {
         document.body.style.overflow = '';
     }
 }
+
+})(); // Конец IIFE

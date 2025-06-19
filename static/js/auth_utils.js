@@ -10,7 +10,9 @@ function getAuthToken() {
 
 // Get token type
 function getTokenType() {
-    return localStorage.getItem(TOKEN_TYPE_KEY) || 'Bearer';
+    const stored = localStorage.getItem(TOKEN_TYPE_KEY);
+    // Всегда возвращаем Bearer с большой буквы
+    return 'Bearer';
 }
 
 // Set auth token
@@ -61,19 +63,33 @@ function parseJwt(token) {
 // Get auth headers for fetch requests
 function getAuthHeaders() {
     const token = getAuthToken();
-    const tokenType = getTokenType();
     
     if (!token) {
+        console.warn('getAuthHeaders: No token found');
         return {};
     }
     
-    return {
-        'Authorization': `${tokenType} ${token}`
+    const headers = {
+        'Authorization': `Bearer ${token}`
     };
+    
+    console.log('getAuthHeaders returning:', {
+        'Authorization': `Bearer ${token.substring(0, 10)}...`
+    });
+    
+    return headers;
 }
 
 // Fetch with authentication
 async function fetchWithAuth(url, options = {}) {
+    const token = getAuthToken();
+    
+    console.log('fetchWithAuth:', {
+        url,
+        token: token ? `${token.substring(0, 10)}...` : 'NO TOKEN',
+        hasToken: !!token
+    });
+    
     const authHeaders = getAuthHeaders();
     
     const fetchOptions = {
@@ -84,14 +100,21 @@ async function fetchWithAuth(url, options = {}) {
         }
     };
     
+    console.log('Request headers:', fetchOptions.headers);
+    
     try {
         const response = await fetch(url, fetchOptions);
         
+        console.log(`Response from ${url}:`, response.status);
+        
         // If unauthorized, redirect to login
         if (response.status === 401) {
+            console.error('Got 401, clearing tokens and redirecting');
             clearAuthTokens();
-            window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
-            return null;
+            setTimeout(() => {
+                window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
+            }, 100);
+            return response; // Возвращаем response, а не null
         }
         
         // If rate limited
@@ -114,16 +137,23 @@ async function fetchWithAuth(url, options = {}) {
 
 // Initialize auth check on page load
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('auth_utils.js: DOMContentLoaded, path:', window.location.pathname);
+    console.log('auth_utils.js: Token present:', !!getAuthToken());
+    
     // Skip auth check for login page and static resources
     if (window.location.pathname === '/login' || window.location.pathname.startsWith('/static/')) {
         return;
     }
     
+    // ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ ОТЛАДКИ
+    /*
     // Check authentication
     if (!isAuthenticated()) {
+        console.log('auth_utils.js: Not authenticated, redirecting to login');
         clearAuthTokens();
         window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
     }
+    */
     
     // Add logout handler to any logout buttons
     const logoutButtons = document.querySelectorAll('[data-action="logout"]');
@@ -204,3 +234,5 @@ window.authUtils = {
     logout,
     setupTokenRefresh
 };
+
+console.log('auth_utils.js loaded, window.authUtils:', window.authUtils);

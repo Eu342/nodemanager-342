@@ -34,12 +34,13 @@ from auth import (
     auth_handler, init_auth_db, create_user, authenticate_user, 
     save_refresh_token, verify_refresh_token, revoke_refresh_token,
     get_current_user, require_admin, login_limiter, api_limiter,
-    Token, UserLogin, UserCreate
+    verify_temp_token, create_temp_token
 )
 from models import (
     ServerForm, RebootRequest, RunScriptsRequest, AddServerRequest, 
     EditServerRequest, VlessKeyUpdate, SettingsUpdate, EventQueryParams,
-    validate_domain, validate_script_name, sanitize_string
+    validate_domain, validate_script_name, sanitize_string,
+    Token, UserLogin, UserCreate
 )
 
 logging.basicConfig(level=logging.DEBUG)
@@ -93,36 +94,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if request.url.path.startswith(public_path):
                 return await call_next(request)
         
-        # Check for Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            # For HTML pages, redirect to login
-            if not request.url.path.startswith("/api/"):
-                return HTMLResponse(
-                    content='<script>window.location.href="/login?return=' + request.url.path + '"</script>',
-                    status_code=302
+        # For API requests, check Authorization header
+        if request.url.path.startswith("/api/"):
+            auth_header = request.headers.get("Authorization")
+            if not auth_header or not auth_header.startswith("Bearer "):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Not authenticated"}
                 )
-            # For API, return 401
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Not authenticated"}
-            )
-        
-        # Verify token
-        try:
-            token = auth_header.split(" ")[1]
-            payload = auth_handler.decode_token(token)
-            request.state.user = payload
-        except Exception:
-            if not request.url.path.startswith("/api/"):
-                return HTMLResponse(
-                    content='<script>window.location.href="/login?return=' + request.url.path + '"</script>',
-                    status_code=302
+            
+            try:
+                token = auth_header.split(" ")[1]
+                payload = auth_handler.decode_token(token)
+                request.state.user = payload
+            except Exception:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid or expired token"}
                 )
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Invalid or expired token"}
-            )
         
         response = await call_next(request)
         return response
@@ -715,18 +704,16 @@ async def login_page():
         logger.error(f"Error serving login.html: {str(e)}")
         raise HTTPException(status_code=500, detail="Login page not found")
 
-@app.post("/api/auth/login", response_model=Token)
+@app.post("/api/auth/login")
 async def login(request: Request, user_data: UserLogin):
     client_ip = request.client.host
     
-    # Check rate limit
     if not login_limiter.is_allowed(client_ip):
         raise HTTPException(
             status_code=429,
             detail="Too many login attempts. Please try again later."
         )
     
-    # Authenticate user
     pool = await get_db_pool()
     user = await authenticate_user(pool, user_data.username, user_data.password, client_ip)
     
@@ -736,19 +723,17 @@ async def login(request: Request, user_data: UserLogin):
             detail="Incorrect username or password"
         )
     
-    # Create tokens
     scopes = ['admin'] if user['is_admin'] else ['user']
     access_token = auth_handler.create_access_token(user['username'], scopes)
     refresh_token = auth_handler.create_refresh_token(user['username'])
     
-    # Save refresh token
     await save_refresh_token(pool, user['id'], refresh_token)
     
-    return Token(
-        access_token=access_token,
-        token_type="bearer",
-        expires_in=60 * int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '60'))
-    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": 60 * int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '60'))
+    }
 
 @app.post("/api/auth/refresh", response_model=Token)
 async def refresh_token(request: Request):
@@ -841,19 +826,19 @@ async def create_new_user(user_data: UserCreate, current_user: Dict[str, Any] = 
     await create_user(pool, user_data.username, user_data.password)
     return {"message": f"User {user_data.username} created successfully"}
 
-# Protected routes
+# HTML routes (authentication checked on client side)
 @app.get("/nodemanager", response_class=HTMLResponse)
-async def index(current_user: Dict[str, Any] = Depends(get_current_user)):
+async def index():
     try:
         with open("static/index.html") as f:
-            logger.info(f"Serving index.html for user {current_user['username']}")
+            logger.info("Serving index.html")
             return HTMLResponse(content=f.read())
     except Exception as e:
         logger.error(f"Error serving index.html: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/add", response_class=HTMLResponse)
-async def add_server_page(current_user: Dict[str, Any] = Depends(get_current_user)):
+async def add_server_page():
     try:
         with open("static/add_server.html") as f:
             logger.info("Serving add_server.html")
@@ -863,7 +848,7 @@ async def add_server_page(current_user: Dict[str, Any] = Depends(get_current_use
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/setup", response_class=HTMLResponse)
-async def setup_server_page(current_user: Dict[str, Any] = Depends(get_current_user)):
+async def setup_server_page():
     try:
         with open("static/setup_server.html") as f:
             logger.info("Serving setup_server.html")
@@ -873,7 +858,7 @@ async def setup_server_page(current_user: Dict[str, Any] = Depends(get_current_u
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/list", response_class=HTMLResponse)
-async def server_list_page(current_user: Dict[str, Any] = Depends(get_current_user)):
+async def server_list_page():
     try:
         with open("static/server_list.html") as f:
             logger.info("Serving server_list.html")
@@ -883,7 +868,7 @@ async def server_list_page(current_user: Dict[str, Any] = Depends(get_current_us
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/uptime", response_class=HTMLResponse)
-async def uptime_page(current_user: Dict[str, Any] = Depends(get_current_user)):
+async def uptime_page():
     try:
         with open("static/uptime.html") as f:
             logger.info("Serving uptime.html")
@@ -893,7 +878,7 @@ async def uptime_page(current_user: Dict[str, Any] = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/nodemanager/settings/subscription", response_class=HTMLResponse)
-async def settings_subscription_page(current_user: Dict[str, Any] = Depends(get_current_user)):
+async def settings_subscription_page():
     try:
         with open("static/settings_subscription.html") as f:
             logger.info("Serving settings_subscription.html")
@@ -1414,7 +1399,7 @@ async def get_server_events_api(
 
 @app.get("/api/uptime/summary")
 async def get_uptime_summary(
-    period: str = Query('24h', pattern=r'^(24h|7d|30d)),
+    period: str = Query('24h', pattern=r'^(24h|7d|30d)$'),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     try:

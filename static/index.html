@@ -733,6 +733,42 @@
     </style>
 </head>
 <body>
+
+    <script src="/static/js/auth_utils.js"></script>
+    <script>
+    // Immediate auth check
+    (function() {
+        const token = localStorage.getItem('access_token');
+        const authSession = sessionStorage.getItem('auth_session');
+        
+        // If no token and no auth session, redirect to login
+        if (!token && !authSession) {
+            window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
+            return;
+        }
+        
+        // If we have a token, verify it's still valid
+        if (token) {
+            fetch('/api/auth/me', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            }).then(response => {
+                if (!response.ok) {
+                    // Token invalid, clear and redirect
+                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('token_type');
+                    sessionStorage.removeItem('auth_session');
+                    window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
+                }
+            }).catch(() => {
+                // Network error, let user continue
+                console.error('Failed to verify auth');
+            });
+        }
+    })();
+    </script>
+
     <div class="app-container">
         <!-- Sidebar - точно как в оригинале -->
         <aside class="sidebar">

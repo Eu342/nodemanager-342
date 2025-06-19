@@ -8,3 +8,16 @@ services:
       - .env
     volumes:
       - .:/app
+
+  redis:
+    image: redis:7-alpine
+    container_name: nodemanager-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+volumes:
+  redis_data:

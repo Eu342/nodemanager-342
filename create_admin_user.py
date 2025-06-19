@@ -13,14 +13,21 @@ import getpass
 load_dotenv()
 
 async def create_admin():
-    # Подключение к БД
-    pool = await asyncpg.create_pool(
-        database=os.getenv('LOCAL_DB_DBNAME'),
-        user=os.getenv('LOCAL_DB_USER'),
-        password=os.getenv('LOCAL_DB_PASSWORD'),
-        host=os.getenv('LOCAL_DB_HOST', 'localhost'),
-        port=os.getenv('LOCAL_DB_PORT', '5432')
-    )
+    # Используем правильные переменные окружения
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    
+    if DATABASE_URL:
+        # Если есть DATABASE_URL, используем его
+        pool = await asyncpg.create_pool(DATABASE_URL)
+    else:
+        # Иначе используем отдельные параметры
+        pool = await asyncpg.create_pool(
+            database=os.getenv('DB_NAME', 'nodemanager'),
+            user=os.getenv('DB_USER', 'postgres'),
+            password=os.getenv('DB_PASSWORD', ''),
+            host=os.getenv('DB_HOST', 'localhost'),
+            port=int(os.getenv('DB_PORT', '5432'))
+        )
     
     try:
         async with pool.acquire() as conn:
@@ -33,8 +40,27 @@ async def create_admin():
             """)
             
             if not table_exists:
-                print("❌ Таблица users не существует. Сначала запустите приложение для инициализации БД.")
-                return
+                print("❌ Таблица users не существует. Создаём таблицу...")
+                
+                # Создаем таблицу users
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        id SERIAL PRIMARY KEY,
+                        username VARCHAR(50) UNIQUE NOT NULL,
+                        password_hash VARCHAR(100) NOT NULL,
+                        is_active BOOLEAN DEFAULT true,
+                        is_admin BOOLEAN DEFAULT false,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_login TIMESTAMP,
+                        failed_attempts INTEGER DEFAULT 0,
+                        locked_until TIMESTAMP
+                    )
+                ''')
+                
+                # Создаем индекс
+                await conn.execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
+                
+                print("✅ Таблица users создана")
             
             print("🔑 Создание администратора NodeManager\n")
             

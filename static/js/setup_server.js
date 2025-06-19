@@ -1,8 +1,19 @@
-const SCRIPT_VERSION = 'original-logic-themed-v2.6-setupserver';
+(function() {
+    'use strict';
+    
+    const SCRIPT_VERSION = 'original-logic-themed-v2.6-setupserver-auth';
 
-// --- Глобальные переменные из вашего оригинального JS ---
-let availableInbounds = [];
-let ipTags = [];
+    // --- Проверка загрузки auth_utils ---
+    if (typeof window.authUtils === 'undefined') {
+        console.error('auth_utils.js must be loaded before setup_server.js');
+    }
+
+    // Создаем локальную ссылку на fetchWithAuth для удобства
+    const fetchWithAuth = window.authUtils?.fetchWithAuth || fetch;
+
+    // --- Глобальные переменные из вашего оригинального JS ---
+    let availableInbounds = [];
+    let ipTags = [];
 
 // --- Общие UI функции темы (стандартизированные) ---
 function loadTheme() {
@@ -108,7 +119,7 @@ function setupMobileMenuEventListeners() {
 async function loadInbounds() {
     try {
         console.log('setup_server.js: Fetching /api/vless_keys');
-        const response = await fetch('/api/vless_keys');
+        const response = await fetchWithAuth('/api/vless_keys');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -300,7 +311,7 @@ async function handleSubmit(e) {
 
     try {
         console.log('setup_server.js: Sending request to /api/add_server with:', { ips: ipTags, inbound_tag: inbound });
-        const response = await fetch('/api/add_server', { 
+        const response = await fetchWithAuth('/api/add_server', { 
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ips: ipTags, inbound_tag: inbound })
@@ -352,3 +363,8 @@ async function handleSubmit(e) {
         updateIPInputUI(); // Теперь этот вызов будет работать
     }
 }
+
+// Export functions that need to be available globally
+window.updateIPInputUI = updateIPInputUI;
+
+})(); // Конец IIFE

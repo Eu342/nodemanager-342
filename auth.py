@@ -2,11 +2,13 @@ import os
 import jwt
 import bcrypt
 import secrets
-from datetime import datetime, timedelta, timezone
+import uuid
+import redis
+import json
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
 import asyncpg
 import logging
 from dotenv import load_dotenv
@@ -27,6 +29,20 @@ if len(SECRET_KEY) < 32:
 
 # Security scheme
 security = HTTPBearer()
+
+# Redis connection
+try:
+    redis_client = redis.Redis(
+        host=os.getenv('REDIS_HOST', 'localhost'),
+        port=int(os.getenv('REDIS_PORT', 6379)),
+        password=os.getenv('REDIS_PASSWORD'),
+        decode_responses=True
+    )
+    redis_client.ping()
+    logger.info("Redis connection established")
+except Exception as e:
+    logger.error(f"Redis connection failed: {e}")
+    redis_client = None
 
 class AuthHandler:
     def __init__(self):
@@ -51,8 +67,8 @@ class AuthHandler:
         """Create JWT access token"""
         payload = {
             'sub': username,
-            'iat': datetime.now(timezone.utc),
-            'exp': datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+            'iat': datetime.utcnow(),
+            'exp': datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
             'type': 'access',
             'scopes': scopes or ['user']
         }
@@ -62,8 +78,8 @@ class AuthHandler:
         """Create JWT refresh token"""
         payload = {
             'sub': username,
-            'iat': datetime.now(timezone.utc),
-            'exp': datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+            'iat': datetime.utcnow(),
+            'exp': datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
             'type': 'refresh'
         }
         return jwt.encode(payload, self.secret, algorithm=self.algorithm)
@@ -87,6 +103,37 @@ class AuthHandler:
             )
 
 auth_handler = AuthHandler()
+
+# Redis functions for temporary tokens
+def create_temp_token(username: str, scopes: List[str]) -> str:
+    """Create temporary token for URL redirect"""
+    if not redis_client:
+        raise Exception("Redis not available")
+    
+    temp_token = str(uuid.uuid4())
+    # Store in Redis with 30 second expiry
+    redis_client.setex(
+        f"temp_token:{temp_token}",
+        30,  # 30 seconds
+        json.dumps({"username": username, "scopes": scopes})
+    )
+    return temp_token
+
+def verify_temp_token(temp_token: str) -> Optional[Dict[str, Any]]:
+    """Verify and consume temporary token"""
+    if not redis_client:
+        return None
+    
+    try:
+        key = f"temp_token:{temp_token}"
+        data = redis_client.get(key)
+        if data:
+            # Delete after use (one-time token)
+            redis_client.delete(key)
+            return json.loads(data)
+    except Exception as e:
+        logger.error(f"Error verifying temp token: {e}")
+    return None
 
 # Database functions
 async def init_auth_db(pool: asyncpg.Pool):
@@ -208,11 +255,14 @@ async def authenticate_user(pool: asyncpg.Pool, username: str, password: str, ip
                 return None
             
             # Check if account is locked
-            if user['locked_until'] and user['locked_until'] > datetime.now(timezone.utc):
-                raise HTTPException(
-                    status_code=status.HTTP_423_LOCKED,
-                    detail=f"Account locked until {user['locked_until'].isoformat()}"
-                )
+            if user['locked_until']:
+                locked_until = user['locked_until']
+                # Compare with offset-naive datetime
+                if locked_until > datetime.utcnow():
+                    raise HTTPException(
+                        status_code=status.HTTP_423_LOCKED,
+                        detail=f"Account locked until {locked_until.isoformat()}"
+                    )
             
             # Verify password
             if not auth_handler.verify_password(password, user['password_hash']):
@@ -222,7 +272,7 @@ async def authenticate_user(pool: asyncpg.Pool, username: str, password: str, ip
                 
                 # Lock account after 5 failed attempts
                 if failed_attempts >= 5:
-                    locked_until = datetime.now(timezone.utc) + timedelta(minutes=30)
+                    locked_until = datetime.utcnow() + timedelta(minutes=30)
                 
                 await conn.execute(
                     '''
@@ -288,18 +338,33 @@ async def authenticate_user(pool: asyncpg.Pool, username: str, password: str, ip
 async def save_refresh_token(pool: asyncpg.Pool, user_id: int, token: str) -> bool:
     """Save refresh token to database"""
     try:
-        token_hash = bcrypt.hashpw(token.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-        
         async with pool.acquire() as conn:
+            # Hash the token for security
+            token_hash = bcrypt.hashpw(token.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            
+            # Delete old refresh tokens for this user (optional: keep last N tokens)
+            await conn.execute(
+                '''
+                DELETE FROM refresh_tokens 
+                WHERE user_id = $1 AND created_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
+                ''',
+                user_id
+            )
+            
+            # Save new refresh token
+            # Use datetime.utcnow() for offset-naive datetime
+            expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
             await conn.execute(
                 '''
                 INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
                 VALUES ($1, $2, $3)
                 ''',
-                user_id, token_hash, expires_at
+                user_id,
+                token_hash,
+                expires_at
             )
-        return True
+            
+            return True
     except Exception as e:
         logger.error(f"Failed to save refresh token: {str(e)}")
         return False
@@ -314,7 +379,7 @@ async def verify_refresh_token(pool: asyncpg.Pool, user_id: int, token: str) -> 
                 FROM refresh_tokens
                 WHERE user_id = $1 AND revoked = false AND expires_at > $2
                 ''',
-                user_id, datetime.now(timezone.utc)
+                user_id, datetime.utcnow()
             )
             
             for token_row in tokens:

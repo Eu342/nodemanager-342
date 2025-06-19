@@ -470,12 +470,14 @@
                 const data = await response.json();
                 
                 if (response.ok) {
-                    // Store token
+                    // Store tokens
                     localStorage.setItem('access_token', data.access_token);
-                    localStorage.setItem('token_type', data.token_type);
-                    
-                    // Redirect to main page or return URL
+                    localStorage.setItem('token_type', data.token_type || 'bearer');
+                        
+                    // Get return URL
                     const returnUrl = new URLSearchParams(window.location.search).get('return') || '/nodemanager';
+                    
+                    // Direct redirect
                     window.location.href = returnUrl;
                 } else {
                     if (response.status === 423) {
