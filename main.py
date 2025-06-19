@@ -25,7 +25,7 @@ import json
 import shutil
 import asyncssh
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from retrying import retry
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
@@ -429,7 +429,7 @@ async def check_ip_in_xray_checker(ip):
             async with session.get(url) as response:
                 if response.status != 200:
                     logger.error(f"Xray Checker status for {ip}: {response.status}")
-                    last_check_time[ip] = datetime.utcnow()
+                    last_check_time[ip] = datetime.utcnow().replace(tzinfo=timezone.utc)
                     return "unknown"
                 metrics = await response.text()
                 logger.debug(f"Metrics for {ip}: {metrics[:1000]}")
@@ -439,7 +439,7 @@ async def check_ip_in_xray_checker(ip):
                 latency_match = re.search(latency_pattern, metrics, re.MULTILINE)
                 if not status_match and not latency_match:
                     logger.debug(f"IP {ip} not found in XrayChecker metrics")
-                    last_check_time[ip] = datetime.utcnow()
+                    last_check_time[ip] = datetime.utcnow().replace(tzinfo=timezone.utc)
                     return "unknown"
                 status = "unknown"
                 if status_match:
@@ -447,15 +447,15 @@ async def check_ip_in_xray_checker(ip):
                 elif latency_match:
                     status = "online" if int(latency_match.group(1)) > 0 else "offline"
                 logger.debug(f"IP {ip} in XrayChecker: status={status}")
-                last_check_time[ip] = datetime.utcnow()
+                last_check_time[ip] = datetime.utcnow().replace(tzinfo=timezone.utc)
                 return status
     except Exception as e:
         logger.error(f"Error checking IP {ip}: {str(e)}\n{traceback.format_exc()}")
-        last_check_time[ip] = datetime.utcnow()
+        last_check_time[ip] = datetime.utcnow().replace(tzinfo=timezone.utc)
         return "unknown"
 
 async def send_initial_webhook(ip, inbound_tag, status):
-    current_time = datetime.utcnow()
+    current_time = datetime.utcnow().replace(tzinfo=timezone.utc)
     duration_minutes = 0
     webhook_payload = {
         "heartbeat": {"msg": "ok" if status == "online" else "fail"},
@@ -552,7 +552,7 @@ async def check_server_statuses():
         logger.debug(f"Current statuses: {current_statuses}")
         logger.debug(f"Previous statuses: {previous_statuses}")
 
-        current_time = datetime.utcnow()
+        current_time = datetime.utcnow().replace(tzinfo=timezone.utc)
         for ip in current_statuses:
             if ip not in valid_ips:
                 logger.debug(f"Skipping IP {ip}: not in servers")
@@ -1405,7 +1405,15 @@ async def get_uptime_summary(
     try:
         period_hours = {'24h': 24, '7d': 168, '30d': 720}.get(period, 24)
         servers = await get_servers()
-        statuses = (await get_server_status(current_user))['statuses']
+        
+        # Get server status without recursion
+        statuses = {}
+        for server in servers:
+            ip = server[0]
+            if is_valid_ip(ip):
+                status = await check_ip_in_xray_checker(ip)
+                statuses[ip] = status
+                
         events = await get_server_events(period_hours, limit=100)
         logger.debug(f"Fetched {len(events)} events for uptime summary")
         
@@ -1432,15 +1440,15 @@ async def get_uptime_summary(
                     offline_start = None
             
             current_status = statuses.get(ip, 'unknown')
-            last_check = last_check_time.get(ip, datetime.utcnow())
+            last_check = last_check_time.get(ip, datetime.utcnow().replace(tzinfo=timezone.utc))
             logger.debug(f"Last check for {ip}: {last_check}")
             
             if current_status in ['offline', 'unknown']:
                 start_time = offline_start if offline_start else last_check
-                if start_time > datetime.utcnow() - timedelta(hours=period_hours):
-                    offline_periods.append((start_time, datetime.utcnow()))
+                if start_time > datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(hours=period_hours):
+                    offline_periods.append((start_time, datetime.utcnow().replace(tzinfo=timezone.utc)))
                 else:
-                    offline_periods.append((datetime.utcnow() - timedelta(hours=period_hours), datetime.utcnow()))
+                    offline_periods.append((datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(hours=period_hours), datetime.utcnow().replace(tzinfo=timezone.utc)))
             
             logger.debug(f"Offline periods for {ip}: {[(start.isoformat(), end.isoformat()) for start, end in offline_periods]}")
             
@@ -1460,7 +1468,7 @@ async def get_uptime_summary(
                     last_status_change = event['event_time']
                     break
             if not last_status_change or current_status in ['offline', 'unknown']:
-                last_status_change = last_check.isoformat()
+                last_status_change = last_check.isoformat() if hasattr(last_check, 'isoformat') else str(last_check)
             
             logger.debug(f"Uptime for {ip}: {uptime_percentage}%, offline_seconds={total_offline_seconds}, events={total_events}")
             

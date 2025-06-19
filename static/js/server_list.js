@@ -727,5 +727,8 @@ window.toggleSelectAll = toggleSelectAll;
 window.sortTable = sortTable;
 window.toggleDropdown = toggleDropdown;
 window.bulkRunScriptFromBar = bulkRunScriptFromBar;
+window.updateRunButtonState = updateRunButtonState;
+window.bulkDelete = bulkDelete;
+window.clearSelection = clearSelection;
 
 })(); // Конец IIFE

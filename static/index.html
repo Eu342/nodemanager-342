@@ -4,344 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NodeManager - Главная</title>
+    <link rel="stylesheet" href="/static/css/server_list.css">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        :root {
-            --bg-primary: #ffffff;
-            --bg-secondary: #f8f9fa;
-            --bg-tertiary: #ffffff;
-            --bg-elevated: #ffffff;
-            --bg-glass: rgba(255, 255, 255, 0.85);
-            --text-primary: #0f1419;
-            --text-secondary: #657786;
-            --text-tertiary: #8b98a5;
-            --text-muted: #aab8c2;
-            --border-light: #f7f9fa;
-            --border-medium: #e1e8ed;
-            --border-strong: #cfd9de;
-            --accent: #1d9bf0;
-            --accent-hover: #1a8cd8;
-            --accent-light: rgba(29, 155, 240, 0.1);
-            --accent-subtle: rgba(29, 155, 240, 0.04);
-            --success: #00ba7c;
-            --success-light: rgba(0, 186, 124, 0.1);
-            --warning: #f7931e;
-            --warning-light: rgba(247, 147, 30, 0.1);
-            --danger: #f4212e;
-            --danger-light: rgba(244, 33, 46, 0.1);
-            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
-            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-            --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
-            --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.15);
-            --radius-sm: 8px;
-            --radius-md: 12px;
-            --radius-lg: 16px;
-            --radius-xl: 20px;
-            --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            --transition-slow: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            --glass-blur: blur(20px);
-        }
-
-        [data-theme="dark"] {
-            --bg-primary: #000000;
-            --bg-secondary: #16181c;
-            --bg-tertiary: #1c1f23;
-            --bg-elevated: #202327;
-            --bg-glass: rgba(0, 0, 0, 0.8);
-            --text-primary: #e7e9ea;
-            --text-secondary: #71767b;
-            --text-tertiary: #71767b;
-            --text-muted: #5b7083;
-            --border-light: #2f3336;
-            --border-medium: #3e4144;
-            --border-strong: #536471;
-            --accent-subtle: rgba(29, 155, 240, 0.08);
-            --shadow-sm: 0 1px 3px rgba(255, 255, 255, 0.04);
-            --shadow-md: 0 4px 12px rgba(255, 255, 255, 0.06);
-            --shadow-lg: 0 8px 24px rgba(255, 255, 255, 0.08);
-            --shadow-xl: 0 20px 60px rgba(255, 255, 255, 0.1);
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            line-height: 1.6;
-            font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-            transition: var(--transition);
-            overflow-x: hidden;
-        }
-
-        .app-container {
-            display: flex;
-            min-height: 100vh;
-            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
-        }
-
-        /* Sidebar - точно как в оригинале */
-        .sidebar {
-            width: 280px;
-            background: var(--bg-glass);
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-            border-right: 1px solid var(--border-light);
-            padding: 24px 0;
-            position: fixed;
-            height: 100vh;
-            z-index: 100;
-            transition: var(--transition-slow);
-        }
-
-        .sidebar-header {
-            padding: 0 24px 24px;
-            border-bottom: 1px solid var(--border-light);
-            margin-bottom: 24px;
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .logo-icon {
-            width: 36px;
-            height: 36px;
-            background: linear-gradient(135deg, var(--accent) 0%, #1a8cd8 100%);
-            border-radius: var(--radius-md);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 700;
-            font-size: 16px;
-            box-shadow: var(--shadow-md);
-        }
-
-        .logo-text {
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--text-primary);
-            letter-spacing: -0.02em;
-        }
-
-        .nav-items {
-            padding: 0 16px;
-        }
-
-        .nav-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 16px;
-            margin-bottom: 2px;
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            transition: var(--transition);
-            color: var(--text-secondary);
-            font-weight: 500;
-            font-size: 15px;
-            position: relative;
-            overflow: hidden;
-            text-decoration: none;
-        }
-
-        .nav-item::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: var(--accent-subtle);
-            opacity: 0;
-            transition: var(--transition);
-            border-radius: var(--radius-md);
-        }
-
-        .nav-item:hover::before {
-            opacity: 1;
-        }
-
-        .nav-item:hover {
-            color: var(--text-primary);
-            transform: translateX(2px);
-        }
-
-        .nav-item.active {
-            background: var(--accent);
-            color: white;
-            box-shadow: var(--shadow-md);
-        }
-
-        .nav-item.active::before {
-            display: none;
-        }
-
-        .nav-item-icon {
-            width: 20px;
-            height: 20px;
-            stroke: currentColor;
-            fill: none;
-            stroke-width: 2;
-            position: relative;
-            z-index: 1;
-        }
-
-        /* Main Content - точно как в оригинале */
-        .main-content {
-            margin-left: 280px;
-            flex: 1;
-            background: var(--bg-primary);
-            min-height: 100vh;
-        }
-
-        .content-header {
-            position: sticky;
-            top: 0;
-            background: var(--bg-glass);
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
-            border-bottom: 1px solid var(--border-light);
-            padding: 20px 32px;
-            z-index: 50;
-        }
-
-        .header-top {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-        }
-
-        .page-title {
-            font-size: 32px;
-            font-weight: 800;
-            color: var(--text-primary);
-            letter-spacing: -0.02em;
-            background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .header-actions {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-
-        .action-button {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 16px;
-            background: var(--bg-elevated);
-            border: 1px solid var(--border-medium);
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            transition: var(--transition);
-            font-weight: 500;
-            font-size: 14px;
-            color: var(--text-primary);
-            text-decoration: none;
-        }
-
-        .action-button:hover {
-            background: var(--bg-secondary);
-            border-color: var(--border-strong);
-            transform: translateY(-1px);
-            box-shadow: var(--shadow-sm);
-        }
-
-        .action-button.primary {
-            background: var(--accent);
-            color: white;
-            border-color: var(--accent);
-        }
-
-        .action-button.primary:hover {
-            background: var(--accent-hover);
-            border-color: var(--accent-hover);
-            box-shadow: var(--shadow-md);
-        }
-
-        /* Stats Cards - точно как в оригинале */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 24px;
-            padding: 32px;
-            margin-bottom: 8px;
-        }
-
-        .stat-card {
-            background: var(--bg-elevated);
-            border: 1px solid var(--border-light);
-            border-radius: var(--radius-lg);
-            padding: 24px;
-            transition: var(--transition-slow);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 3px;
-            background: linear-gradient(90deg, var(--accent) 0%, var(--success) 100%);
-        }
-
-        .stat-card:hover {
-            transform: translateY(-4px);
-            box-shadow: var(--shadow-lg);
-            border-color: var(--border-medium);
-        }
-
-        .stat-value {
-            font-size: 36px;
-            font-weight: 800;
-            color: var(--text-primary);
-            margin-bottom: 8px;
-            line-height: 1;
-            letter-spacing: -0.02em;
-        }
-
-        .stat-label {
-            font-size: 14px;
-            color: var(--text-secondary);
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .stat-icon {
-            position: absolute;
-            top: 24px;
-            right: 24px;
-            width: 24px;
-            height: 24px;
-            color: var(--accent);
-            opacity: 0.7;
-        }
-
-        /* Dashboard Content */
-        .dashboard-section {
-            padding: 0 32px 32px;
-        }
-
+        /* Дополнительные стили для главной страницы */
         .welcome-card {
-            background: linear-gradient(135deg, var(--accent) 0%, #1a8cd8 100%);
+            background: linear-gradient(135deg, var(--accent) 0%, #5856d6 100%);
             border-radius: var(--radius-lg);
             padding: 32px;
             margin-bottom: 32px;
@@ -359,6 +26,11 @@
             height: 200%;
             background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
             animation: float 6s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-10px) rotate(180deg); }
         }
 
         .welcome-content {
@@ -409,11 +81,12 @@
             display: grid;
             grid-template-columns: 2fr 1fr;
             gap: 24px;
+            margin-bottom: 32px;
         }
 
         .dashboard-card {
-            background: var(--bg-elevated);
-            border: 1px solid var(--border-light);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
             border-radius: var(--radius-lg);
             padding: 24px;
             box-shadow: var(--shadow-sm);
@@ -443,7 +116,7 @@
 
         .refresh-button {
             padding: 8px;
-            background: var(--bg-secondary);
+            background: var(--bg-tertiary);
             border: 1px solid var(--border-medium);
             border-radius: var(--radius-sm);
             cursor: pointer;
@@ -457,72 +130,12 @@
             transform: rotate(180deg);
         }
 
-        .activity-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--border-light);
-            transition: var(--transition);
-        }
-
-        .activity-item:last-child {
-            border-bottom: none;
-        }
-
-        .activity-item:hover {
-            background: var(--accent-subtle);
-            border-radius: var(--radius-sm);
-            padding-left: 16px;
-            padding-right: 16px;
-        }
-
-        .activity-icon {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
-
-        .activity-icon.success {
-            background: var(--success-light);
-            color: var(--success);
-        }
-
-        .activity-icon.info {
-            background: var(--accent-light);
-            color: var(--accent);
-        }
-
-        .activity-icon.warning {
-            background: var(--warning-light);
-            color: var(--warning);
-        }
-
-        .activity-text {
-            flex: 1;
-        }
-
-        .activity-action {
-            font-weight: 500;
-            color: var(--text-primary);
-            font-size: 14px;
-        }
-
-        .activity-time {
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-
         .system-info-item {
             display: flex;
             align-items: center;
             justify-content: space-between;
             padding: 12px 0;
-            border-bottom: 1px solid var(--border-light);
+            border-bottom: 1px solid var(--border-primary);
         }
 
         .system-info-item:last-child {
@@ -551,6 +164,7 @@
             font-weight: 500;
         }
 
+        /* Используем те же классы статусов из других страниц */
         .status-online {
             background: var(--success-light);
             color: var(--success);
@@ -566,158 +180,37 @@
             color: var(--danger);
         }
 
-        .status-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: currentColor;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes float {
-            0%, 100% {
-                transform: translateY(0px) rotate(0deg);
-            }
-            50% {
-                transform: translateY(-10px) rotate(180deg);
-            }
-        }
-
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: 0.5;
-            }
-        }
-
-        /* Toast Notifications - как в оригинале */
-        .toast-container {
-            position: fixed;
-            bottom: 24px;
-            right: 24px;
-            z-index: 3000;
+        /* Используем классы activity из uptime.css */
+        .activity-item {
             display: flex;
-            flex-direction: column;
+            align-items: flex-start;
             gap: 12px;
-        }
-
-        .toast {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 16px 20px;
-            background: var(--bg-elevated);
-            border: 1px solid var(--border-medium);
-            border-radius: var(--radius-md);
-            box-shadow: var(--shadow-lg);
-            min-width: 320px;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-primary);
+            transition: var(--transition);
             opacity: 0;
-            transform: translateX(100px);
-            transition: var(--transition-slow);
-            backdrop-filter: var(--glass-blur);
-            -webkit-backdrop-filter: var(--glass-blur);
+            transform: translateY(10px);
         }
 
-        .toast.show {
-            opacity: 1;
-            transform: translateX(0);
+        .activity-item:last-child {
+            border-bottom: none;
         }
 
-        .toast.success {
-            border-left: 4px solid var(--success);
+        .activity-item:hover {
+            background: var(--accent-subtle);
+            margin: 0 -12px;
+            padding-left: 12px;
+            padding-right: 12px;
+            border-radius: var(--radius-md);
         }
 
-        .toast.error {
-            border-left: 4px solid var(--danger);
-        }
-
-        .toast.info {
-            border-left: 4px solid var(--accent);
-        }
-
-        .toast-icon {
-            width: 20px;
-            height: 20px;
-            stroke: currentColor;
-            fill: none;
-            stroke-width: 2;
-        }
-
-        .toast.success .toast-icon {
-            color: var(--success);
-        }
-
-        .toast.error .toast-icon {
-            color: var(--danger);
-        }
-
-        .toast.info .toast-icon {
-            color: var(--accent);
-        }
-
-        .toast-message {
-            flex: 1;
-            font-weight: 500;
-            color: var(--text-primary);
-        }
-
-        /* Responsive - точно как в оригинале */
-        @media (max-width: 1024px) {
-            .sidebar {
-                transform: translateX(-100%);
-            }
-
-            .sidebar.mobile-open {
-                transform: translateX(0);
-            }
-
-            .main-content {
-                margin-left: 0;
-            }
-
-            .stats-grid {
-                grid-template-columns: 1fr;
-                padding: 24px;
-            }
-
-            .content-header,
-            .dashboard-section {
-                padding-left: 24px;
-                padding-right: 24px;
-            }
-
+        @media (max-width: 1200px) {
             .content-grid {
                 grid-template-columns: 1fr;
             }
         }
 
-        @media (max-width: 640px) {
-            .page-title {
-                font-size: 24px;
-            }
-
-            .header-actions {
-                flex-wrap: wrap;
-                gap: 8px;
-            }
-
-            .action-button {
-                padding: 8px 12px;
-                font-size: 13px;
-            }
-
-            .stats-grid {
-                padding: 16px;
-            }
-
-            .content-header,
-            .dashboard-section {
-                padding-left: 16px;
-                padding-right: 16px;
-            }
-
+        @media (max-width: 768px) {
             .welcome-card {
                 padding: 20px;
             }
@@ -729,49 +222,19 @@
             .quick-actions {
                 flex-direction: column;
             }
+
+            .dashboard-card {
+                padding: 16px;
+            }
         }
     </style>
 </head>
 <body>
+    <div class="app">
+        <div class="mobile-overlay" id="mobileOverlay"></div>
 
-    <script src="/static/js/auth_utils.js"></script>
-    <script>
-    // Immediate auth check
-    (function() {
-        const token = localStorage.getItem('access_token');
-        const authSession = sessionStorage.getItem('auth_session');
-        
-        // If no token and no auth session, redirect to login
-        if (!token && !authSession) {
-            window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
-            return;
-        }
-        
-        // If we have a token, verify it's still valid
-        if (token) {
-            fetch('/api/auth/me', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            }).then(response => {
-                if (!response.ok) {
-                    // Token invalid, clear and redirect
-                    localStorage.removeItem('access_token');
-                    localStorage.removeItem('token_type');
-                    sessionStorage.removeItem('auth_session');
-                    window.location.href = '/login?return=' + encodeURIComponent(window.location.pathname);
-                }
-            }).catch(() => {
-                // Network error, let user continue
-                console.error('Failed to verify auth');
-            });
-        }
-    })();
-    </script>
-
-    <div class="app-container">
-        <!-- Sidebar - точно как в оригинале -->
-        <aside class="sidebar">
+        <!-- Sidebar - единый со всеми страницами -->
+        <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
                     <div class="logo-icon">N</div>
@@ -779,43 +242,80 @@
                 </div>
             </div>
             
-            <nav class="nav-items">
-                <a href="/nodemanager" class="nav-item active" data-page="dashboard">
-                    <svg class="nav-item-icon" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2v2zm0 0V5a2 2 0 012-2h6l2 2h6a2 2 0 012 2v2"/>
-                    </svg>
-                    <span>Главная</span>
-                </a>
+            <div class="nav-section">
+                <div class="nav-group">
+                    <div class="nav-group-title">Overview</div>
+                    <a href="/nodemanager" class="nav-item active" data-page="dashboard">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <rect x="3" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="14" width="7" height="7"></rect>
+                            <rect x="3" y="14" width="7" height="7"></rect>
+                        </svg>
+                        <span>Главная</span>
+                    </a>
+                    <a href="/nodemanager/uptime" class="nav-item" data-page="uptime">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M18 20V10m-6 10V4M6 20V14"></path>
+                        </svg>
+                        <span>Аптайм</span>
+                    </a>
+                </div>
                 
-                <a href="/nodemanager/add" class="nav-item" data-page="add">
-                    <svg class="nav-item-icon" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
-                    </svg>
-                    <span>Добавить сервер</span>
-                </a>
+                <div class="nav-group">
+                    <div class="nav-group-title">Management</div>
+                    <a href="/nodemanager/list" class="nav-item" data-page="list">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <line x1="8" y1="6" x2="21" y2="6"></line>
+                            <line x1="8" y1="12" x2="21" y2="12"></line>
+                            <line x1="8" y1="18" x2="21" y2="18"></line>
+                            <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                            <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                            <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                        </svg>
+                        <span>Список серверов</span>
+                    </a>
+                    <a href="/nodemanager/add" class="nav-item" data-page="add">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="16"></line>
+                            <line x1="8" y1="12" x2="16" y2="12"></line>
+                        </svg>
+                        <span>Добавить сервер</span>
+                    </a>
+                    <a href="/nodemanager/setup" class="nav-item" data-page="install">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M8 17l4 4 4-4M12 12v9"></path>
+                            <path d="M20.88 18.09A5 5 0 0018 9h-1.26A8 8 0 103 16.29"></path>
+                        </svg>
+                        <span>Настроить сервер</span>
+                    </a>
+                </div>
                 
-                <a href="/nodemanager/setup" class="nav-item" data-page="install">
-                    <svg class="nav-item-icon" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
-                    </svg>
-                    <span>Настроить сервер</span>
-                </a>
-                
-                <a href="/nodemanager/list" class="nav-item" data-page="list">
-                    <svg class="nav-item-icon" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                    </svg>
-                    <span>Список серверов</span>
-                </a>
-            </nav>
+                <div class="nav-group">
+                    <div class="nav-group-title">System</div>
+                    <a href="/nodemanager/settings/subscription" class="nav-item" data-page="settings">
+                        <svg class="nav-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"></path>
+                        </svg>
+                        <span>Настройки</span>
+                    </a>
+                </div>
+            </div>
         </aside>
 
         <!-- Main Content -->
-        <main class="main-content">
-            <!-- Header - точно как в оригинале -->
-            <header class="content-header">
-                <div class="header-top">
-                    <h1 class="page-title">Панель управления</h1>
+        <main class="main">
+            <!-- Header - единый стиль -->
+            <header class="header">
+                <div class="header-content">
+                    <div class="header-left">
+                        <div>
+                            <h1 class="page-title">Панель управления</h1>
+                            <p class="page-subtitle">Общий обзор системы NodeManager</p>
+                        </div>
+                    </div>
                     <div class="header-actions">
                         <a href="/nodemanager/add" class="action-button primary">
                             <svg class="nav-item-icon" style="width: 16px; height: 16px;" viewBox="0 0 24 24">
@@ -837,44 +337,82 @@
                     </div>
                 </div>
             </header>
+            
+            <!-- Mobile Menu Toggle -->
+            <button class="mobile-menu-toggle" id="mobileMenuToggle">
+                <svg style="width: 20px; height: 20px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                </svg>
+            </button>
 
-            <!-- Stats Cards - точно как в оригинале -->
-            <section class="stats-grid">
-                <div class="stat-card">
-                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
-                    </svg>
-                    <div class="stat-value" id="totalServers">12</div>
-                    <div class="stat-label">Всего серверов</div>
-                </div>
-                
-                <div class="stat-card">
-                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-                    </svg>
-                    <div class="stat-value" id="onlineServers">9</div>
-                    <div class="stat-label">Онлайн</div>
-                </div>
-                
-                <div class="stat-card">
-                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                    </svg>
-                    <div class="stat-value" id="uptime">99.2%</div>
-                    <div class="stat-label">Время работы</div>
-                </div>
-                
-                <div class="stat-card">
-                    <svg class="stat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-                    </svg>
-                    <div class="stat-value" id="totalTraffic">847 ГБ</div>
-                    <div class="stat-label">Трафик (месяц)</div>
-                </div>
-            </section>
+            <div class="content">
+                <!-- Stats Overview - используем единые классы -->
+                <section class="stats-overview">
+                    <div class="overview-card">
+                        <div class="overview-content">
+                            <div class="overview-text">
+                                <div class="overview-value" id="totalServers">
+                                    <span class="loading"><span class="spinner"></span></span>
+                                </div>
+                                <div class="overview-label">Всего серверов</div>
+                            </div>
+                            <div class="overview-icon">
+                                <svg style="width: 24px; height: 24px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="overview-card success">
+                        <div class="overview-content">
+                            <div class="overview-text">
+                                <div class="overview-value" id="onlineServers">
+                                    <span class="loading"><span class="spinner"></span></span>
+                                </div>
+                                <div class="overview-label">Онлайн</div>
+                            </div>
+                            <div class="overview-icon success">
+                                <svg style="width: 24px; height: 24px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="overview-card warning">
+                        <div class="overview-content">
+                            <div class="overview-text">
+                                <div class="overview-value" id="uptime">
+                                    <span class="loading"><span class="spinner"></span></span>
+                                </div>
+                                <div class="overview-label">Средний аптайм</div>
+                            </div>
+                            <div class="overview-icon warning">
+                                <svg style="width: 24px; height: 24px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="overview-card">
+                        <div class="overview-content">
+                            <div class="overview-text">
+                                <div class="overview-value" id="totalEvents">
+                                    <span class="loading"><span class="spinner"></span></span>
+                                </div>
+                                <div class="overview-label">События (24ч)</div>
+                            </div>
+                            <div class="overview-icon">
+                                <svg style="width: 24px; height: 24px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                </section>
 
-            <!-- Dashboard Content -->
-            <section class="dashboard-section">
                 <!-- Welcome Card -->
                 <div class="welcome-card">
                     <div class="welcome-content">
@@ -894,12 +432,11 @@
                                 </svg>
                                 Просмотр серверов
                             </a>
-                            <a href="/nodemanager/setup" class="quick-action">
+                            <a href="/nodemanager/uptime" class="quick-action">
                                 <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
                                 </svg>
-                                Настройки
+                                Мониторинг
                             </a>
                         </div>
                     </div>
@@ -924,64 +461,8 @@
                         </div>
                         
                         <div class="activity-list" id="activityList">
-                            <div class="activity-item">
-                                <div class="activity-icon success">
-                                    <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                                    </svg>
-                                </div>
-                                <div class="activity-text">
-                                    <div class="activity-action">Сервер 192.168.1.10 успешно подключен</div>
-                                    <div class="activity-time">2 минуты назад</div>
-                                </div>
-                            </div>
-
-                            <div class="activity-item">
-                                <div class="activity-icon info">
-                                    <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                                    </svg>
-                                </div>
-                                <div class="activity-text">
-                                    <div class="activity-action">Перезагрузка сервера 10.0.0.15</div>
-                                    <div class="activity-time">15 минут назад</div>
-                                </div>
-                            </div>
-
-                            <div class="activity-item">
-                                <div class="activity-icon success">
-                                    <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                                    </svg>
-                                </div>
-                                <div class="activity-text">
-                                    <div class="activity-action">Добавлен новый сервер 203.0.113.5</div>
-                                    <div class="activity-time">1 час назад</div>
-                                </div>
-                            </div>
-
-                            <div class="activity-item">
-                                <div class="activity-icon warning">
-                                    <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.664-.833-2.464 0L4.348 16.5c-.77.833.192 2.5 1.732 2.5z"/>
-                                    </svg>
-                                </div>
-                                <div class="activity-text">
-                                    <div class="activity-action">Высокая нагрузка на сервере 198.51.100.3</div>
-                                    <div class="activity-time">3 часа назад</div>
-                                </div>
-                            </div>
-
-                            <div class="activity-item">
-                                <div class="activity-icon info">
-                                    <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                                    </svg>
-                                </div>
-                                <div class="activity-text">
-                                    <div class="activity-action">Обновление системы на сервере 172.16.0.8</div>
-                                    <div class="activity-time">5 часов назад</div>
-                                </div>
+                            <div class="loading">
+                                <span class="spinner"></span> Загрузка событий...
                             </div>
                         </div>
                     </div>
@@ -1007,7 +488,9 @@
 
                         <div class="system-info-item">
                             <span class="system-info-label">Средняя нагрузка</span>
-                            <span class="system-info-value">23%</span>
+                            <span class="system-info-value" id="avgLoadValue">
+                                <span class="loading"><span class="spinner"></span></span>
+                            </span>
                         </div>
 
                         <div class="system-info-item">
@@ -1035,7 +518,7 @@
 
                         <div class="system-info-item">
                             <span class="system-info-label">Активные соединения</span>
-                            <span class="system-info-value">247</span>
+                            <span class="system-info-value" id="activeConnectionsValue">247</span>
                         </div>
 
                         <div class="system-info-item">
@@ -1044,161 +527,241 @@
                         </div>
                     </div>
                 </div>
-            </section>
+            </div>
         </main>
     </div>
 
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
+    <script src="/static/js/auth_utils.js"></script>
     <script>
         // Global variables
-        let dashboardData = {
-            totalServers: 12,
-            onlineServers: 9,
-            uptime: 99.2,
-            totalTraffic: 847
+        let serversData = [];
+        let eventsData = [];
+        let statsData = {
+            totalServers: 0,
+            onlineServers: 0,
+            averageUptime: 0,
+            totalEvents: 0
         };
 
         // Initialize dashboard
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             console.log('Dashboard loaded');
             loadTheme();
-            updateDashboardStats();
+            setupEventListeners();
+            await loadDashboardData();
             
             // Start periodic updates
-            setInterval(updateDashboardStats, 30000); // Update every 30 seconds
+            setInterval(loadDashboardData, 30000); // Update every 30 seconds
         });
+
+        // Setup event listeners
+        function setupEventListeners() {
+            const mobileMenuToggle = document.getElementById('mobileMenuToggle');
+            if (mobileMenuToggle) {
+                mobileMenuToggle.addEventListener('click', toggleMobileMenu);
+            }
+            
+            const overlay = document.getElementById('mobileOverlay');
+            if (overlay) {
+                overlay.addEventListener('click', closeMobileMenu);
+            }
+        }
+
+        // Load all dashboard data
+        async function loadDashboardData() {
+            try {
+                // Load servers and statuses
+                const [serversResponse, statusesResponse] = await Promise.all([
+                    window.authUtils.fetchWithAuth('/api/servers'),
+                    window.authUtils.fetchWithAuth('/api/server_status')
+                ]);
+
+                if (!serversResponse.ok) throw new Error(`HTTP error! status: ${serversResponse.status}`);
+                if (!statusesResponse.ok) throw new Error(`HTTP error! status: ${statusesResponse.status}`);
+
+                const serversResult = await serversResponse.json();
+                const statusesResult = await statusesResponse.json();
+
+                serversData = (serversResult.servers || []).map(server => ({
+                    ...server,
+                    status: (statusesResult.statuses || {})[server.ip] || 'unknown'
+                }));
+
+                // Load uptime summary
+                const uptimeResponse = await window.authUtils.fetchWithAuth('/api/uptime/summary?period=24h');
+                if (uptimeResponse.ok) {
+                    const uptimeResult = await uptimeResponse.json();
+                    const uptimeData = uptimeResult.data || [];
+                    
+                    if (uptimeData.length > 0) {
+                        statsData.averageUptime = uptimeData.reduce((sum, s) => sum + s.uptime_percentage, 0) / uptimeData.length;
+                    }
+                }
+
+                // Load events
+                const eventsResponse = await window.authUtils.fetchWithAuth('/api/server_events?period=24h&limit=5');
+                if (eventsResponse.ok) {
+                    const eventsResult = await eventsResponse.json();
+                    eventsData = eventsResult.events || [];
+                    statsData.totalEvents = eventsData.length;
+                }
+
+                // Update stats
+                statsData.totalServers = serversData.length;
+                statsData.onlineServers = serversData.filter(s => s.status === 'online').length;
+
+                updateDashboardStats();
+                renderActivityFeed();
+
+                // Generate mock average load based on online servers
+                const avgLoad = statsData.onlineServers > 0 ? 
+                    Math.round(15 + Math.random() * 25) + '%' : 
+                    '0%';
+                document.getElementById('avgLoadValue').textContent = avgLoad;
+
+            } catch (error) {
+                console.error('Error loading dashboard data:', error);
+                showToast('Ошибка загрузки данных: ' + error.message, 'error');
+            }
+        }
 
         // Update dashboard statistics
         function updateDashboardStats() {
-            // Simulate some variation in stats
-            const variation = () => (Math.random() - 0.5) * 0.1;
-            
-            dashboardData.onlineServers = Math.min(dashboardData.totalServers, 
-                Math.max(6, dashboardData.onlineServers + Math.round(variation() * 2)));
-            
-            dashboardData.uptime = Math.min(100, 
-                Math.max(95, dashboardData.uptime + variation()));
-            
-            dashboardData.totalTraffic += Math.round(Math.random() * 5);
+            document.getElementById('totalServers').textContent = statsData.totalServers;
+            document.getElementById('onlineServers').textContent = statsData.onlineServers;
+            document.getElementById('uptime').textContent = statsData.averageUptime.toFixed(1) + '%';
+            document.getElementById('totalEvents').textContent = statsData.totalEvents;
+        }
 
-            // Update DOM
-            document.getElementById('totalServers').textContent = dashboardData.totalServers;
-            document.getElementById('onlineServers').textContent = dashboardData.onlineServers;
-            document.getElementById('uptime').textContent = dashboardData.uptime.toFixed(1) + '%';
-            document.getElementById('totalTraffic').textContent = dashboardData.totalTraffic + ' ГБ';
+        // Render activity feed with real events
+        function renderActivityFeed() {
+            const activityList = document.getElementById('activityList');
+            
+            if (eventsData.length === 0) {
+                activityList.innerHTML = '<div class="activity-item" style="opacity: 1; transform: none;">Нет недавних событий</div>';
+                return;
+            }
+
+            activityList.innerHTML = eventsData.slice(0, 5).map(event => {
+                let iconClass = 'info';
+                let iconSvg = '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>';
+                
+                if (event.event_type === 'online' || event.event_type === 'offline_end') {
+                    iconClass = 'success';
+                    iconSvg = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>';
+                } else if (event.event_type === 'offline_start') {
+                    iconClass = 'warning';
+                    iconSvg = '<polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>';
+                }
+
+                let actionText = '';
+                switch(event.event_type) {
+                    case 'online':
+                        actionText = `Сервер ${event.server_ip} подключен`;
+                        break;
+                    case 'offline_start':
+                        actionText = `Соединение с ${event.server_ip} потеряно`;
+                        break;
+                    case 'offline_end':
+                        actionText = `Сервер ${event.server_ip} снова онлайн`;
+                        break;
+                    default:
+                        actionText = `Событие '${event.event_type}' для ${event.server_ip}`;
+                }
+
+                return `
+                    <div class="activity-item">
+                        <div class="activity-icon ${iconClass}">
+                            <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                ${iconSvg}
+                            </svg>
+                        </div>
+                        <div class="activity-text">
+                            <div class="activity-action">${actionText}</div>
+                            <div class="activity-time">${formatRelativeTime(event.event_time)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Animate items
+            const items = activityList.querySelectorAll('.activity-item');
+            items.forEach((item, index) => {
+                setTimeout(() => {
+                    item.style.opacity = '1';
+                    item.style.transform = 'translateY(0)';
+                }, index * 50);
+            });
+        }
+
+        // Format relative time
+        function formatRelativeTime(dateString) {
+            if (!dateString) return 'Неизвестно';
+            
+            try {
+                const date = new Date(dateString);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMin = Math.floor(diffMs / 60000);
+                const diffHr = Math.floor(diffMin / 60);
+                const diffDay = Math.floor(diffHr / 24);
+
+                if (diffMin < 1) return 'Только что';
+                if (diffMin < 60) return `${diffMin} мин. назад`;
+                if (diffHr < 24) return `${diffHr} ч. назад`;
+                if (diffDay < 7) return `${diffDay} дн. назад`;
+                
+                return date.toLocaleDateString('ru-RU', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+                });
+            } catch (e) {
+                return 'Неверная дата';
+            }
         }
 
         // Refresh dashboard
-        function refreshDashboard() {
+        async function refreshDashboard() {
             const button = event.target.closest('.action-button');
-            const originalHTML = button.innerHTML;
+            const icon = button.querySelector('svg');
             
-            // Show loading state
-            button.innerHTML = `
-                <svg style="width: 16px; height: 16px; animation: spin 1s linear infinite;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                </svg>
-                Обновление...
-            `;
+            // Rotate icon
+            if (icon) {
+                icon.style.transition = 'transform 0.5s';
+                icon.style.transform = 'rotate(360deg)';
+            }
             
-            // Simulate loading
-            setTimeout(() => {
-                button.innerHTML = originalHTML;
-                updateDashboardStats();
-                refreshActivity();
+            button.disabled = true;
+            
+            try {
+                await loadDashboardData();
                 showToast('Данные обновлены', 'success');
-            }, 1500);
+            } catch (error) {
+                showToast('Ошибка обновления: ' + error.message, 'error');
+            } finally {
+                button.disabled = false;
+                if (icon) {
+                    setTimeout(() => {
+                        icon.style.transform = 'rotate(0deg)';
+                    }, 500);
+                }
+            }
         }
 
-        // Refresh activity feed
+        // Refresh activity (for mock purposes)
         function refreshActivity() {
             const button = document.querySelector('.refresh-button');
             button.style.transform = 'rotate(360deg)';
             
             setTimeout(() => {
                 button.style.transform = 'rotate(0deg)';
-                
-                // Add new activity item
-                const activities = [
-                    { 
-                        icon: 'success', 
-                        action: 'Сервер 172.16.0.22 подключен успешно', 
-                        time: 'Только что' 
-                    },
-                    { 
-                        icon: 'info', 
-                        action: 'Обновление конфигурации сервера 10.1.1.30', 
-                        time: '30 секунд назад' 
-                    },
-                    { 
-                        icon: 'warning', 
-                        action: 'Предупреждение: высокий ping на 203.0.113.15', 
-                        time: '1 минуту назад' 
-                    },
-                    { 
-                        icon: 'success', 
-                        action: 'Резервное копирование завершено', 
-                        time: '2 минуты назад' 
-                    },
-                    { 
-                        icon: 'info', 
-                        action: 'Мониторинг системы активирован', 
-                        time: '5 минут назад' 
-                    }
-                ];
-                
-                const randomActivity = activities[Math.floor(Math.random() * activities.length)];
-                addActivityItem(randomActivity);
+                // Could add new mock activity here if needed
+                showToast('События обновлены', 'info');
             }, 300);
-        }
-
-        // Add new activity item
-        function addActivityItem(activity) {
-            const activityList = document.getElementById('activityList');
-            const newItem = document.createElement('div');
-            newItem.className = 'activity-item';
-            newItem.style.opacity = '0';
-            
-            const iconSvgs = {
-                success: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>',
-                info: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
-                warning: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.664-.833-2.464 0L4.348 16.5c-.77.833.192 2.5 1.732 2.5z"/>'
-            };
-            
-            newItem.innerHTML = `
-                <div class="activity-icon ${activity.icon}">
-                    <svg style="width: 16px; height: 16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        ${iconSvgs[activity.icon]}
-                    </svg>
-                </div>
-                <div class="activity-text">
-                    <div class="activity-action">${activity.action}</div>
-                    <div class="activity-time">${activity.time}</div>
-                </div>
-            `;
-            
-            // Insert at the beginning
-            activityList.insertBefore(newItem, activityList.firstChild);
-            
-            // Animate in
-            setTimeout(() => {
-                newItem.style.opacity = '1';
-                newItem.style.transform = 'translateY(0)';
-            }, 100);
-            
-            // Remove excess items
-            if (activityList.children.length > 5) {
-                const lastItem = activityList.lastElementChild;
-                lastItem.style.opacity = '0';
-                lastItem.style.transform = 'translateY(-20px)';
-                setTimeout(() => {
-                    if (activityList.contains(lastItem)) {
-                        activityList.removeChild(lastItem);
-                    }
-                }, 300);
-            }
         }
 
         // Theme functions
@@ -1208,11 +771,11 @@
             if (isDark) {
                 document.documentElement.removeAttribute('data-theme');
                 localStorage.removeItem('theme');
-                showToast('Включена светлая тема', 'info');
+                showToast('Светлая тема включена', 'info');
             } else {
                 document.documentElement.setAttribute('data-theme', 'dark');
                 localStorage.setItem('theme', 'dark');
-                showToast('Включена темная тема', 'info');
+                showToast('Тёмная тема включена', 'info');
             }
         }
 
@@ -1223,21 +786,63 @@
             }
         }
 
+        // Mobile menu functions
+        function toggleMobileMenu() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('mobileOverlay');
+            const menuButton = document.getElementById('mobileMenuToggle');
+            
+            const isOpen = sidebar.classList.contains('mobile-open');
+            
+            if (isOpen) {
+                closeMobileMenu();
+            } else {
+                sidebar.classList.add('mobile-open');
+                overlay.classList.add('show');
+                menuButton.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+        }
+
+        function closeMobileMenu() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('mobileOverlay');
+            const menuButton = document.getElementById('mobileMenuToggle');
+            
+            sidebar.classList.remove('mobile-open');
+            overlay.classList.remove('show');
+            menuButton.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
         // Toast notifications
-        function showToast(message, type = 'info') {
+        function showToast(message, type = 'info', duration = 4000) {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
             
             toast.className = `toast ${type}`;
+            
+            let iconSvg = '';
+            switch(type) {
+                case 'success':
+                    iconSvg = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>';
+                    break;
+                case 'error':
+                    iconSvg = '<polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>';
+                    break;
+                case 'warning':
+                    iconSvg = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>';
+                    break;
+                default:
+                    iconSvg = '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>';
+            }
+            
             toast.innerHTML = `
-                <svg class="toast-icon" viewBox="0 0 24 24">
-                    ${type === 'success' ? 
-                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>' :
-                        type === 'error' ?
-                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>' :
-                        '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'
-                    }
-                </svg>
+                <span class="toast-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        ${iconSvg}
+                    </svg>
+                </span>
                 <div class="toast-message">${message}</div>
             `;
             
@@ -1254,23 +859,8 @@
                         container.removeChild(toast);
                     }
                 }, 300);
-            }, 4000);
+            }, duration);
         }
-
-        // Add CSS for animations
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-            
-            .activity-item {
-                transform: translateY(0);
-                transition: all 0.3s ease;
-            }
-        `;
-        document.head.appendChild(style);
 
         // Welcome message on first load
         window.addEventListener('load', () => {
